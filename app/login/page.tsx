@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { TimaLogo } from "@/app/components/TimaLogo";
 
 const TOKEN_KEY = "tima_access_token";
@@ -40,11 +41,18 @@ export default function LoginPage() {
       };
       if (!res.ok) throw new Error(data.error ?? "Login failed");
 
-      // Store token in sessionStorage for apiFetch (Bearer token fallback).
-      // Auth cookies are set by the server's Set-Cookie response headers —
-      // do NOT call setSession() here as it creates conflicting cookies.
       if (data.access_token && typeof window !== "undefined") {
         window.sessionStorage.setItem(TOKEN_KEY, data.access_token);
+
+        // Also sync the session into the browser Supabase client so it
+        // writes auth cookies via document.cookie (backup for Set-Cookie).
+        const supabase = createSupabaseBrowserClient();
+        await supabase.auth.setSession({
+          access_token: data.access_token,
+          refresh_token: data.refresh_token || "",
+        });
+        // Let the async cookie-writing callbacks complete before navigating
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
 
       window.location.href = nextUrl;

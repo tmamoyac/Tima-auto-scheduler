@@ -52,6 +52,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 401 });
   }
 
+  // Supabase's onAuthStateChange callback populates cookiesToSet asynchronously.
+  // Yield to the event loop so it completes before we build the response.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
   const session = data?.session;
   const response = NextResponse.json({
     ok: true,

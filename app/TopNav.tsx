@@ -18,9 +18,10 @@ export function TopNav({ showSuperAdmin = false }: { showSuperAdmin?: boolean })
     <div className="w-full border-b border-gray-200 bg-white">
       <div className="w-full px-4 py-3 flex items-center justify-between gap-4">
         {isSuperPage ? (
-          <a
-            href="/admin/scheduler?tab=setup"
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-700 hover:text-gray-900 hover:underline"
+          <button
+            type="button"
+            onClick={() => { window.location.href = "/admin/scheduler?tab=setup"; }}
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-700 hover:text-gray-900 hover:underline bg-transparent border-none cursor-pointer p-0"
           >
             <svg
               className="w-4 h-4"
@@ -37,7 +38,7 @@ export function TopNav({ showSuperAdmin = false }: { showSuperAdmin?: boolean })
               />
             </svg>
             Back to Setup
-          </a>
+          </button>
         ) : (
           <div />
         )}
