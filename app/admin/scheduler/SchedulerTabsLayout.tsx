@@ -9,12 +9,14 @@ type TabId = "setup" | "schedule";
 export function SchedulerTabsLayout({
   programId,
   academicYearId,
+  programName,
   initialTab = "schedule",
   isSuperAdmin = false,
   children,
 }: {
   programId: string;
   academicYearId: string;
+  programName?: string;
   initialTab?: TabId;
   isSuperAdmin?: boolean;
   children: React.ReactNode;
@@ -39,6 +41,7 @@ export function SchedulerTabsLayout({
       <ResidencyAdminHeader
         programId={programId}
         currentTab={activeTab}
+        programName={programName}
         isSuperAdmin={isSuperAdmin}
         showSuperAdminLink={isSuperAdmin}
       />

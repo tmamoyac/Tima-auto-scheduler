@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type ContextResult =
-  | { programId: string; academicYearId: string; useAdminClient: boolean; isSuperAdmin: boolean }
+  | { programId: string; academicYearId: string; programName?: string; useAdminClient: boolean; isSuperAdmin: boolean }
   | { error: "DEACTIVATED" }
   | null;
 
@@ -22,9 +22,16 @@ async function getContext(
   try {
     const ctx = await getSchedulerContext(supabase, supabaseAdmin, programIdOverride);
     if (!ctx.academicYearId) return null;
+    const { data: program } = await supabaseAdmin
+      .from("programs")
+      .select("name")
+      .eq("id", ctx.programId)
+      .maybeSingle();
+    const programName = (program as { name?: string } | null)?.name;
     return {
       programId: ctx.programId,
       academicYearId: ctx.academicYearId,
+      programName,
       useAdminClient: ctx.useAdminClient,
       isSuperAdmin: ctx.isSuperAdmin,
     };
@@ -179,7 +186,7 @@ export default async function SchedulerPage({
     );
   }
 
-  const { programId, academicYearId, isSuperAdmin } = context;
+  const { programId, academicYearId, programName, isSuperAdmin } = context;
   const versionIdParam = typeof params.versionId === "string" ? params.versionId : undefined;
   const tabParam = params.tab === "setup" || params.tab === "schedule" ? params.tab : "schedule";
 
@@ -189,6 +196,7 @@ export default async function SchedulerPage({
       <SchedulerTabsLayout
         programId={programId}
         academicYearId={academicYearId}
+        programName={programName}
         initialTab="setup"
         isSuperAdmin={isSuperAdmin}
       >
@@ -235,6 +243,7 @@ export default async function SchedulerPage({
     <SchedulerTabsLayout
       programId={programId}
       academicYearId={academicYearId}
+      programName={programName}
       initialTab={tabParam}
       isSuperAdmin={isSuperAdmin}
     >

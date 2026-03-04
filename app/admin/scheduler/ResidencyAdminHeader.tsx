@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/apiFetch";
 import { safeParseJson } from "@/lib/fetchJson";
+import { TimaLogo } from "@/app/components/TimaLogo";
 
 type Program = { id: string; name: string };
 
@@ -59,13 +60,23 @@ export function ResidencyAdminHeader({
     programs.find((p) => p.id === programId)?.name ??
     "Program";
 
+  const directorPrograms: Program[] = [
+    { id: programId, name: currentProgramName },
+  ];
+
+  const displayPrograms = isSuperAdmin ? programs : directorPrograms;
+  const displayLoading = isSuperAdmin && loading;
+
   return (
     <header className="bg-white border-b border-gray-200">
       <div className="max-w-7xl mx-auto px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex flex-col gap-1">
-            <h1 className="text-lg font-semibold text-gray-900">Cassava Health</h1>
-            {isSuperAdmin ? (
+            <div className="flex items-center gap-2">
+              <TimaLogo className="w-6 h-6 text-indigo-600 shrink-0" />
+              <h1 className="text-lg font-semibold text-gray-900">Tima</h1>
+            </div>
+            {(isSuperAdmin || directorPrograms.length > 0) ? (
               <form
                 method="get"
                 action="/admin/scheduler"
@@ -86,17 +97,17 @@ export function ResidencyAdminHeader({
                     const params = new URLSearchParams({ tab, programId: selected });
                     window.location.assign(`${form.action}?${params.toString()}`);
                   }}
-                  disabled={loading || programs.length === 0}
+                  disabled={displayLoading || displayPrograms.length === 0}
                   className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium bg-white min-w-[220px] focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:opacity-60 disabled:cursor-not-allowed text-gray-700"
                 >
-                {loading ? (
+                {displayLoading ? (
                   <option value="">Loading programs…</option>
                 ) : fetchError ? (
                   <option value="">Failed to load programs</option>
-                ) : programs.length === 0 ? (
+                ) : displayPrograms.length === 0 ? (
                   <option value="">No programs</option>
                 ) : (
-                  programs.map((p) => (
+                  displayPrograms.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}
                     </option>
