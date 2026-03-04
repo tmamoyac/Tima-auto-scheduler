@@ -2,10 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
 export async function middleware(request: NextRequest) {
-  // Important: use `NextResponse.next()` and return it (cookies may be refreshed).
-  let response = NextResponse.next({
-    request: { headers: request.headers },
-  });
+  // Important: pass full request so route handlers receive request.cookies (needed for auth on Vercel).
+  let response = NextResponse.next({ request });
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
