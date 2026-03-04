@@ -5,7 +5,7 @@ import { directorAuthErrorResponse } from "@/lib/auth/directorContext";
 import { getProgramContextForRequest, getProgramIdFromRequest } from "@/lib/auth/schedulerContext";
 
 export async function GET(request: NextRequest) {
-  const supabase = createSupabaseServerClient();
+  const supabase = createSupabaseServerClient(request);
   const programIdFromQuery = getProgramIdFromRequest(request.nextUrl.searchParams);
   let ctx;
   try {
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const supabase = createSupabaseServerClient();
+  const supabase = createSupabaseServerClient(request);
   const programIdFromQuery = getProgramIdFromRequest(request.nextUrl.searchParams);
   let ctx;
   try {

@@ -9,7 +9,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const supabase = createSupabaseServerClient();
+  const supabase = createSupabaseServerClient(request);
   const programIdFromQuery = getProgramIdFromRequest(request.nextUrl.searchParams);
   let ctx;
   try {
@@ -47,7 +47,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const supabase = createSupabaseServerClient();
+  const supabase = createSupabaseServerClient(request);
   const programIdFromQuery = getProgramIdFromRequest(request.nextUrl.searchParams);
   let ctx;
   try {

@@ -6,7 +6,7 @@ import { getProgramContextForRequest, getProgramIdFromRequest } from "@/lib/auth
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createSupabaseServerClient();
+    const supabase = createSupabaseServerClient(request);
     const programIdFromQuery = getProgramIdFromRequest(request.nextUrl.searchParams);
     const { programId, academicYearId } = await getProgramContextForRequest(
       supabase,

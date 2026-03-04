@@ -18,7 +18,7 @@ function lastDayUTC(year: number, monthIndex1to12: number): Date {
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createSupabaseServerClient();
+    const supabase = createSupabaseServerClient(request);
     await requireSuperAdmin(supabase);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "";
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createSupabaseServerClient();
+    const supabase = createSupabaseServerClient(request);
     await requireSuperAdmin(supabase);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "";

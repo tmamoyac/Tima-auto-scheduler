@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
   let needTables = false;
 
   try {
-    const supabase = createSupabaseServerClient();
+    const supabase = createSupabaseServerClient(request);
     const programIdFromQuery = getProgramIdFromRequest(request.nextUrl.searchParams);
     const ctx = await getProgramContextForRequest(supabase, supabaseAdmin, programIdFromQuery);
     if (!ctx.academicYearId) {

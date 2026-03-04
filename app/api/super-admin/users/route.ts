@@ -3,9 +3,9 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { requireSuperAdmin } from "@/lib/auth/superAdmin";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const supabase = createSupabaseServerClient();
+    const supabase = createSupabaseServerClient(request);
     await requireSuperAdmin(supabase);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "";
@@ -54,7 +54,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createSupabaseServerClient();
+    const supabase = createSupabaseServerClient(request);
     await requireSuperAdmin(supabase);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "";

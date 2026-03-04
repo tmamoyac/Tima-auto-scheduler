@@ -8,7 +8,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = createSupabaseServerClient();
+    const supabase = createSupabaseServerClient(request);
     await requireSuperAdmin(supabase);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "";

@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const academicYearIdParam = searchParams.get("academicYearId");
   const programIdFromQuery = getProgramIdFromRequest(searchParams);
-  const supabase = createSupabaseServerClient();
+    const supabase = createSupabaseServerClient(request);
   let ctx;
   try {
     ctx = await getProgramContextForRequest(supabase, supabaseAdmin, programIdFromQuery);

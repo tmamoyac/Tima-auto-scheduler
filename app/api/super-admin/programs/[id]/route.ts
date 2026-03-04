@@ -3,9 +3,9 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { requireSuperAdmin } from "@/lib/auth/superAdmin";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
-async function guard() {
+async function guard(request: NextRequest) {
   try {
-    const supabase = createSupabaseServerClient();
+    const supabase = createSupabaseServerClient(request);
     await requireSuperAdmin(supabase);
     return null;
   } catch (e) {
@@ -20,7 +20,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const errRes = await guard();
+  const errRes = await guard(request);
   if (errRes) return errRes;
 
   const { id } = await params;

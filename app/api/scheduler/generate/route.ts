@@ -11,7 +11,7 @@ function jsonError(message: string, status: number) {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createSupabaseServerClient();
+    const supabase = createSupabaseServerClient(request);
     const programIdFromQuery = getProgramIdFromRequest(request.nextUrl.searchParams);
     const ctx = await getProgramContextForRequest(supabase, supabaseAdmin, programIdFromQuery);
     if (!ctx.academicYearId) return jsonError("No academic year found for program", 400);

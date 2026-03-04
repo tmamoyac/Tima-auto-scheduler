@@ -1,14 +1,14 @@
-import { NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { requireSuperAdmin } from "@/lib/auth/superAdmin";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export async function POST(
-  _request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = createSupabaseServerClient();
+    const supabase = createSupabaseServerClient(request);
     await requireSuperAdmin(supabase);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "";

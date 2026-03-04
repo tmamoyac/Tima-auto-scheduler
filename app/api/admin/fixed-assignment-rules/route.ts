@@ -9,7 +9,7 @@ export async function GET(request: NextRequest) {
   if (!academicYearId) {
     return NextResponse.json({ error: "academicYearId required" }, { status: 400 });
   }
-  const supabase = createSupabaseServerClient();
+  const supabase = createSupabaseServerClient(request);
   const programIdFromQuery = getProgramIdFromRequest(request.nextUrl.searchParams);
   let ctx;
   try {
@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const supabase = createSupabaseServerClient();
+  const supabase = createSupabaseServerClient(request);
   const programIdFromQuery = getProgramIdFromRequest(request.nextUrl.searchParams);
   let ctx;
   try {
@@ -142,7 +142,7 @@ export async function DELETE(request: NextRequest) {
   if (!id) {
     return NextResponse.json({ error: "id required" }, { status: 400 });
   }
-  const supabase = createSupabaseServerClient();
+  const supabase = createSupabaseServerClient(request);
   const programIdFromQuery = getProgramIdFromRequest(request.nextUrl.searchParams);
   let ctx;
   try {
