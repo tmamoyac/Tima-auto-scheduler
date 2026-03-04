@@ -44,13 +44,10 @@ export function createSupabaseServerClient(request?: NextRequest) {
         return cookies().getAll();
       },
       setAll(cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[]) {
-        if (!request) {
-          const store = cookies();
-          for (const { name, value, options } of cookiesToSet) {
-            store.set(name, value, options ?? {});
-          }
+        const store = cookies();
+        for (const { name, value, options } of cookiesToSet) {
+          store.set(name, value, (options ?? {}) as Parameters<typeof store.set>[2]);
         }
-        // In Route Handlers, middleware handles cookie refresh; we only need to read
       },
     },
   });

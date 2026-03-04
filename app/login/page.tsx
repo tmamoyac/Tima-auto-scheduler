@@ -3,7 +3,6 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { TimaLogo } from "@/app/components/TimaLogo";
 
 export default function LoginPage() {
@@ -20,12 +19,15 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
     try {
-      const supabase = createSupabaseBrowserClient();
-      const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
-      if (authError) throw new Error(authError.message);
-      if (!data.session) throw new Error("No session returned");
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+        credentials: "include",
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Login failed");
 
-      await new Promise((r) => setTimeout(r, 100));
       window.location.href = nextUrl;
       return;
     } catch (err) {
