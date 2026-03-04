@@ -1,0 +1,390 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { safeParseJson } from "@/lib/fetchJson";
+import { ActionsMenu } from "./ActionsMenu";
+
+type Rotation = {
+  id: string;
+  name: string;
+  capacity_per_month: number;
+  eligible_pgy_min: number;
+  eligible_pgy_max: number;
+  is_consult?: boolean;
+};
+
+export function RotationsSection({
+  programId,
+  variant = "default",
+}: {
+  programId: string;
+  variant?: "default" | "minimal";
+}) {
+  const [list, setList] = useState<Rotation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<Rotation | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({
+    name: "",
+    capacity_per_month: 4,
+    eligible_pgy_min: 1,
+    eligible_pgy_max: 3,
+    is_consult: false,
+  });
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const res = await fetch(`/api/admin/rotations?programId=${encodeURIComponent(programId)}`, {
+        signal: controller.signal,
+        cache: "no-store",
+        credentials: "include",
+      });
+      clearTimeout(timeoutId);
+      const data = await safeParseJson<Rotation[] | { error?: string }>(res);
+      if (!res.ok) throw new Error("error" in data ? data.error : "Failed to load");
+      if (Array.isArray(data)) setList(data);
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.name === "AbortError"
+            ? "Request timed out. Restart dev server and check terminal for errors."
+            : e.message
+          : "Failed to load rotations"
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [programId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const openAdd = () => {
+    setEditing(null);
+    setAdding(true);
+    setForm({ name: "", capacity_per_month: 4, eligible_pgy_min: 1, eligible_pgy_max: 3, is_consult: false });
+  };
+
+  const openEdit = (r: Rotation) => {
+    setEditing(r);
+    setAdding(false);
+    setForm({
+      name: r.name,
+      capacity_per_month: r.capacity_per_month,
+      eligible_pgy_min: r.eligible_pgy_min,
+      eligible_pgy_max: r.eligible_pgy_max,
+      is_consult: r.is_consult === true,
+    });
+  };
+
+  const deleteRotation = async (r: Rotation) => {
+    if (!confirm(`Delete rotation "${r.name}"? This cannot be undone.`)) return;
+    try {
+      const res = await fetch(`/api/admin/rotations/${r.id}?programId=${encodeURIComponent(programId)}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error((await safeParseJson<{ error?: string }>(res)).error || "Failed");
+      if (editing?.id === r.id) setEditing(null);
+      load();
+    } catch (e) {
+      alert(String(e));
+    }
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      if (editing) {
+        const res = await fetch(`/api/admin/rotations/${editing.id}?programId=${encodeURIComponent(programId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(form),
+          credentials: "include",
+        });
+        if (!res.ok) throw new Error((await safeParseJson<{ error?: string }>(res)).error || "Failed");
+      } else {
+        const res = await fetch(`/api/admin/rotations?programId=${encodeURIComponent(programId)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...form, program_id: programId }),
+          credentials: "include",
+        });
+        if (!res.ok) throw new Error((await safeParseJson<{ error?: string }>(res)).error || "Failed");
+      }
+      setEditing(null);
+      setAdding(false);
+      load();
+    } catch (e) {
+      alert(String(e));
+    }
+    setSaving(false);
+  };
+
+  if (variant === "minimal") {
+    return (
+      <section>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Rotations</h2>
+          <button
+            type="button"
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg self-start sm:self-auto"
+            onClick={openAdd}
+          >
+            + Add Rotation
+          </button>
+        </div>
+        {loading ? (
+          <p className="text-sm text-gray-500 py-4">Loading…</p>
+        ) : error ? (
+          <p className="text-sm text-red-600 py-4">{error}</p>
+        ) : (
+          <>
+            <div className="divide-y divide-gray-100">
+              {list.map((r) => (
+                <div
+                  key={r.id}
+                  className="flex items-center gap-4 py-3 first:pt-0"
+                >
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium text-gray-900">{r.name}</span>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 shrink-0">
+                    {r.capacity_per_month}/mo
+                  </span>
+                  <span className="text-sm text-gray-600 shrink-0">
+                    {r.eligible_pgy_min}–{r.eligible_pgy_max}
+                  </span>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-xs font-medium shrink-0 ${
+                      r.is_consult ? "bg-indigo-100 text-indigo-700" : "bg-gray-100 text-gray-700"
+                    }`}
+                  >
+                    {r.is_consult ? "Consult" : "Other"}
+                  </span>
+                  <ActionsMenu
+                    items={[
+                      { label: "Edit", onClick: () => openEdit(r) },
+                      { label: "Delete", onClick: () => deleteRotation(r), variant: "danger" },
+                    ]}
+                  />
+                </div>
+              ))}
+            </div>
+            {(editing !== null || adding) && (
+              <div className="mt-4 flex flex-wrap gap-2 items-center rounded-lg border border-gray-200 p-4 bg-gray-50">
+                <input
+                  placeholder="Name"
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                />
+                <input
+                  type="number"
+                  min={1}
+                  placeholder="Capacity"
+                  value={form.capacity_per_month}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, capacity_per_month: Number(e.target.value) || 0 }))
+                  }
+                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm w-20"
+                />
+                <span className="text-sm text-gray-600">PGY</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={5}
+                  value={form.eligible_pgy_min}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, eligible_pgy_min: Number(e.target.value) || 1 }))
+                  }
+                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm w-14"
+                />
+                <span className="text-sm">–</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={5}
+                  value={form.eligible_pgy_max}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, eligible_pgy_max: Number(e.target.value) || 3 }))
+                  }
+                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm w-14"
+                />
+                <label className="flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={form.is_consult}
+                    onChange={(e) => setForm((f) => ({ ...f, is_consult: e.target.checked }))}
+                    className="rounded"
+                  />
+                  Consult
+                </label>
+                <button
+                  type="button"
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg disabled:opacity-50"
+                  onClick={save}
+                  disabled={saving}
+                >
+                  {editing ? "Update" : "Create"}
+                </button>
+                <button
+                  type="button"
+                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-sm font-medium rounded-lg"
+                  onClick={() => {
+                    setEditing(null);
+                    setAdding(false);
+                    setForm({
+                      name: "",
+                      capacity_per_month: 4,
+                      eligible_pgy_min: 1,
+                      eligible_pgy_max: 3,
+                      is_consult: false,
+                    });
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </section>
+    );
+  }
+
+  return (
+    <section className="mb-10">
+      <h2 className="text-xl font-semibold mb-3">Rotations</h2>
+      {loading ? (
+        <p className="text-sm text-gray-500">Loading…</p>
+      ) : error ? (
+        <p className="text-sm text-red-600">{error}</p>
+      ) : (
+        <>
+          <table className="border-collapse border border-gray-300 text-sm w-full max-w-2xl">
+            <thead>
+              <tr>
+                <th className="border border-gray-300 bg-gray-100 p-2 text-left">Name</th>
+                <th className="border border-gray-300 bg-gray-100 p-2 text-left">Capacity/month</th>
+                <th className="border border-gray-300 bg-gray-100 p-2 text-left">Eligible PGY</th>
+                <th className="border border-gray-300 bg-gray-100 p-2 text-left">Consult</th>
+                <th className="border border-gray-300 bg-gray-100 p-2 text-left">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((r) => (
+                <tr key={r.id}>
+                  <td className="border border-gray-300 p-2">{r.name}</td>
+                  <td className="border border-gray-300 p-2">{r.capacity_per_month}</td>
+                  <td className="border border-gray-300 p-2">
+                    {r.eligible_pgy_min}–{r.eligible_pgy_max}
+                  </td>
+                  <td className="border border-gray-300 p-2">{r.is_consult ? "Yes" : "No"}</td>
+                  <td className="border border-gray-300 p-2">
+                    <button
+                      type="button"
+                      className="text-blue-600 underline mr-2"
+                      onClick={() => openEdit(r)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="text-red-600 underline"
+                      onClick={() => deleteRotation(r)}
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="mt-3 flex flex-wrap gap-4 items-end">
+            <button type="button" className="px-3 py-1.5 bg-gray-200 rounded" onClick={openAdd}>
+              Add rotation
+            </button>
+            {(editing !== null || adding) && (
+              <div className="flex flex-wrap gap-2 items-center border border-gray-300 rounded p-3 bg-gray-50">
+                <input
+                  placeholder="Name"
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  className="border border-gray-300 rounded px-2 py-1"
+                />
+                <input
+                  type="number"
+                  min={1}
+                  placeholder="Capacity"
+                  value={form.capacity_per_month}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, capacity_per_month: Number(e.target.value) || 0 }))
+                  }
+                  className="border border-gray-300 rounded px-2 py-1 w-20"
+                />
+                <span className="text-sm">PGY</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={5}
+                  value={form.eligible_pgy_min}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, eligible_pgy_min: Number(e.target.value) || 1 }))
+                  }
+                  className="border border-gray-300 rounded px-2 py-1 w-14"
+                />
+                <span className="text-sm">–</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={5}
+                  value={form.eligible_pgy_max}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, eligible_pgy_max: Number(e.target.value) || 3 }))
+                  }
+                  className="border border-gray-300 rounded px-2 py-1 w-14"
+                />
+                <label className="flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={form.is_consult}
+                    onChange={(e) => setForm((f) => ({ ...f, is_consult: e.target.checked }))}
+                    className="rounded"
+                  />
+                  Counts as consult (for back-to-back rule)
+                </label>
+                <button
+                  type="button"
+                  className="px-3 py-1.5 bg-blue-600 text-white rounded"
+                  onClick={save}
+                  disabled={saving}
+                >
+                  {editing ? "Update" : "Create"}
+                </button>
+                <button
+                  type="button"
+                  className="px-3 py-1.5 bg-gray-300 rounded"
+                  onClick={() => {
+                    setEditing(null);
+                    setAdding(false);
+                    setForm({ name: "", capacity_per_month: 4, eligible_pgy_min: 1, eligible_pgy_max: 3, is_consult: false });
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}

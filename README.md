@@ -1,24 +1,89 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+## Cassava auto scheduler
+
+Shareable scheduler app for a single program director (Supabase + Next.js).
 
 ## Getting Started
 
-First, run the development server:
+### 1) Create `.env.local`
+
+Create a `.env.local` file with:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+Optional (only needed to run `scripts/seed.js` locally):
+
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+### 2) Create the DB tables (Supabase SQL Editor)
+
+In Supabase → **SQL Editor** → **New query**, run your migration SQL files in `scripts/migrations/` (at minimum you need the scheduler tables and auth/RLS):
+
+- `scripts/migrations/add_schedule_versions_and_assignments.sql`
+- `scripts/migrations/add_fixed_assignment_rules.sql`
+- `scripts/migrations/vacation_requests_week_based.sql`
+- `scripts/migrations/auth_profiles_and_rls.sql`
+
+### 3) Create the director login (Supabase Auth)
+
+In Supabase → **Authentication**:
+
+- Create a user (email + password) for the program director.
+- Insert a `profiles` row mapping the user to the program:
+
+```sql
+insert into profiles (id, program_id)
+values ('<auth.users.id>', '<programs.id>');
+```
+
+### 4) Run the dev server
+
+Run:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open `http://localhost:3000/login`, sign in, then you’ll land on the scheduler.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Deploy to Vercel (free tier)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 1) Push to GitHub
+
+- Create a GitHub repo
+- Push this project (ensure `.env.local` is not committed; it's in `.gitignore`)
+
+### 2) Create a Vercel project
+
+- [Vercel](https://vercel.com) → **New Project** → import your GitHub repo
+
+### 3) Add env vars in Vercel
+
+In Vercel → Project → **Settings** → **Environment Variables** (Production):
+
+| Variable | Value |
+|----------|-------|
+| `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Your Supabase anon key |
+| `NEXT_PUBLIC_APP_URL` | Your Vercel URL (e.g. `https://your-app.vercel.app`) — set after first deploy; required for password reset links |
+
+Optional: `SUPABASE_SERVICE_ROLE_KEY` — add only if you use Super Admin (user management / password reset). Do not add for basic director-only use.
+
+### 4) Configure Supabase Auth URLs
+
+In Supabase → **Authentication** → **URL Configuration**:
+
+- **Site URL**: `https://your-app.vercel.app` (your Vercel URL)
+- **Redirect URLs**: add `https://your-app.vercel.app/auth/callback` (keep `http://localhost:3000/auth/callback` for local dev)
+
+### 5) Share the login link
+
+After deploy, share with the program director: `https://your-app.vercel.app/login` and their credentials.
+
+## Notes
+
+- **Protected routes**: `/admin/*`, `/api/admin/*`, and `/api/scheduler/*` require login (see `middleware.ts`).
+- **Program scoping**: access is enforced by Supabase RLS policies (see `scripts/migrations/auth_profiles_and_rls.sql`).
 
 ## Learn More
 
@@ -29,8 +94,4 @@ To learn more about Next.js, take a look at the following resources:
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Next.js deploy docs: https://nextjs.org/docs/app/building-your-application/deploying
