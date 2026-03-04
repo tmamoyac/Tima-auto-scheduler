@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { apiFetch } from "@/lib/apiFetch";
 import { safeParseJson } from "@/lib/fetchJson";
 import { ActionsMenu } from "./ActionsMenu";
 
@@ -40,7 +41,7 @@ export function RotationsSection({
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
-      const res = await fetch(`/api/admin/rotations?programId=${encodeURIComponent(programId)}`, {
+      const res = await apiFetch(`/api/admin/rotations?programId=${encodeURIComponent(programId)}`, {
         signal: controller.signal,
         cache: "no-store",
         credentials: "include",
@@ -87,7 +88,7 @@ export function RotationsSection({
   const deleteRotation = async (r: Rotation) => {
     if (!confirm(`Delete rotation "${r.name}"? This cannot be undone.`)) return;
     try {
-      const res = await fetch(`/api/admin/rotations/${r.id}?programId=${encodeURIComponent(programId)}`, {
+      const res = await apiFetch(`/api/admin/rotations/${r.id}?programId=${encodeURIComponent(programId)}`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -103,7 +104,7 @@ export function RotationsSection({
     setSaving(true);
     try {
       if (editing) {
-        const res = await fetch(`/api/admin/rotations/${editing.id}?programId=${encodeURIComponent(programId)}`, {
+        const res = await apiFetch(`/api/admin/rotations/${editing.id}?programId=${encodeURIComponent(programId)}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(form),
@@ -111,7 +112,7 @@ export function RotationsSection({
         });
         if (!res.ok) throw new Error((await safeParseJson<{ error?: string }>(res)).error || "Failed");
       } else {
-        const res = await fetch(`/api/admin/rotations?programId=${encodeURIComponent(programId)}`, {
+        const res = await apiFetch(`/api/admin/rotations?programId=${encodeURIComponent(programId)}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ...form, program_id: programId }),

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { apiFetch } from "@/lib/apiFetch";
 import { safeParseJson } from "@/lib/fetchJson";
 import { ActionsMenu } from "./ActionsMenu";
 
@@ -39,7 +40,7 @@ export function ResidentsSection({
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
-      const res = await fetch(`/api/admin/residents?programId=${encodeURIComponent(programId)}`, {
+      const res = await apiFetch(`/api/admin/residents?programId=${encodeURIComponent(programId)}`, {
         signal: controller.signal,
         cache: "no-store",
         credentials: "include",
@@ -85,7 +86,7 @@ export function ResidentsSection({
   const deleteResident = async (r: Resident) => {
     if (!confirm(`Delete ${r.first_name} ${r.last_name}? This cannot be undone.`)) return;
     try {
-      const res = await fetch(`/api/admin/residents/${r.id}?programId=${encodeURIComponent(programId)}`, {
+      const res = await apiFetch(`/api/admin/residents/${r.id}?programId=${encodeURIComponent(programId)}`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -111,7 +112,7 @@ export function ResidentsSection({
 
   const toggleActive = async (r: Resident) => {
     try {
-      const res = await fetch(`/api/admin/residents/${r.id}?programId=${encodeURIComponent(programId)}`, {
+      const res = await apiFetch(`/api/admin/residents/${r.id}?programId=${encodeURIComponent(programId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...r, is_active: !r.is_active }),
@@ -129,7 +130,7 @@ export function ResidentsSection({
     setSaving(true);
     try {
       if (editing) {
-        const res = await fetch(`/api/admin/residents/${editing.id}?programId=${encodeURIComponent(programId)}`, {
+        const res = await apiFetch(`/api/admin/residents/${editing.id}?programId=${encodeURIComponent(programId)}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(form),
@@ -137,7 +138,7 @@ export function ResidentsSection({
         });
         if (!res.ok) throw new Error((await safeParseJson<{ error?: string }>(res)).error || "Failed");
       } else {
-        const res = await fetch(`/api/admin/residents?programId=${encodeURIComponent(programId)}`, {
+        const res = await apiFetch(`/api/admin/residents?programId=${encodeURIComponent(programId)}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ...form, program_id: programId }),

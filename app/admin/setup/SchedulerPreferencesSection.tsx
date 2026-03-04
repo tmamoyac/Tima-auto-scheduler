@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { apiFetch } from "@/lib/apiFetch";
 import { safeParseJson } from "@/lib/fetchJson";
 
 export function SchedulerPreferencesSection({ programId }: { programId: string }) {
@@ -14,7 +15,7 @@ export function SchedulerPreferencesSection({ programId }: { programId: string }
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/admin/programs/${encodeURIComponent(programId)}?programId=${encodeURIComponent(programId)}`, {
+      const res = await apiFetch(`/api/admin/programs/${encodeURIComponent(programId)}?programId=${encodeURIComponent(programId)}`, {
         cache: "no-store",
         credentials: "include",
       });
@@ -39,7 +40,7 @@ export function SchedulerPreferencesSection({ programId }: { programId: string }
     setAvoidBackToBackConsult(checked);
     setSaving(true);
     try {
-      const res = await fetch(`/api/admin/programs/${encodeURIComponent(programId)}?programId=${encodeURIComponent(programId)}`, {
+      const res = await apiFetch(`/api/admin/programs/${encodeURIComponent(programId)}?programId=${encodeURIComponent(programId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ avoid_back_to_back_consult: checked }),
@@ -58,7 +59,7 @@ export function SchedulerPreferencesSection({ programId }: { programId: string }
     setNoConsultWhenVacationInMonth(checked);
     setSaving(true);
     try {
-      const res = await fetch(`/api/admin/programs/${encodeURIComponent(programId)}?programId=${encodeURIComponent(programId)}`, {
+      const res = await apiFetch(`/api/admin/programs/${encodeURIComponent(programId)}?programId=${encodeURIComponent(programId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ no_consult_when_vacation_in_month: checked }),

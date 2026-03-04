@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { apiFetch } from "@/lib/apiFetch";
 
 export function GenerateScheduleButton({ programId }: { programId: string }) {
   const router = useRouter();
@@ -12,9 +13,8 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
     setLoading(true);
     setMessage(null);
     try {
-      const res = await fetch(`/api/scheduler/generate?programId=${encodeURIComponent(programId)}`, {
+      const res = await apiFetch(`/api/scheduler/generate?programId=${encodeURIComponent(programId)}`, {
         method: "POST",
-        credentials: "include",
       });
       const contentType = res.headers.get("content-type") ?? "";
       let data: { error?: string } = {};

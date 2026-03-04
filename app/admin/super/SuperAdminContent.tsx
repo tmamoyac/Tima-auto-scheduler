@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { apiFetch } from "@/lib/apiFetch";
 
 type User = {
   id: string;
@@ -54,8 +55,8 @@ export function SuperAdminContent() {
       const timeout = setTimeout(() => controller.abort(), 15000);
 
       const [usersRes, programsRes] = await Promise.all([
-        fetch("/api/super-admin/users", { signal: controller.signal, credentials: "include" }),
-        fetch("/api/super-admin/programs", { signal: controller.signal, credentials: "include" }),
+        apiFetch("/api/super-admin/users", { signal: controller.signal }),
+        apiFetch("/api/super-admin/programs", { signal: controller.signal }),
       ]);
       clearTimeout(timeout);
 
@@ -93,7 +94,7 @@ export function SuperAdminContent() {
     if (!user.program_id) return;
     setActionMsg(null);
     try {
-      const res = await fetch(`/api/super-admin/users/${user.id}`, {
+      const res = await apiFetch(`/api/super-admin/users/${user.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_active: !user.is_active }),
@@ -112,7 +113,7 @@ export function SuperAdminContent() {
     setActionMsg(null);
     setResettingPasswordUserId(user.id);
     try {
-      const res = await fetch(`/api/super-admin/users/${user.id}/reset-password`, {
+      const res = await apiFetch(`/api/super-admin/users/${user.id}/reset-password`, {
         method: "POST",
         credentials: "include",
       });
@@ -131,7 +132,7 @@ export function SuperAdminContent() {
     setSetPasswordSubmitting(true);
     setActionMsg(null);
     try {
-      const res = await fetch(`/api/super-admin/users/${setPasswordUserId}/set-password`, {
+      const res = await apiFetch(`/api/super-admin/users/${setPasswordUserId}/set-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password: setPasswordValue }),
@@ -164,7 +165,7 @@ export function SuperAdminContent() {
     setEditError(null);
     setActionMsg(null);
     try {
-      const res = await fetch(`/api/super-admin/users/${editUserId}`, {
+      const res = await apiFetch(`/api/super-admin/users/${editUserId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -192,7 +193,7 @@ export function SuperAdminContent() {
   const handleToggleProgramActive = async (program: Program) => {
     setActionMsg(null);
     try {
-      const res = await fetch(`/api/super-admin/programs/${program.id}`, {
+      const res = await apiFetch(`/api/super-admin/programs/${program.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_active: program.is_active !== false ? false : true }),
@@ -212,7 +213,7 @@ export function SuperAdminContent() {
     setCreateProgramSubmitting(true);
     setCreateProgramError(null);
     try {
-      const res = await fetch("/api/super-admin/programs", {
+      const res = await apiFetch("/api/super-admin/programs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: createProgramName.trim() }),
@@ -236,7 +237,7 @@ export function SuperAdminContent() {
     setCreateSubmitting(true);
     setCreateError(null);
     try {
-      const res = await fetch("/api/super-admin/users", {
+      const res = await apiFetch("/api/super-admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",

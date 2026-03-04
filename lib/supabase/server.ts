@@ -1,7 +1,16 @@
 import type { NextRequest } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { parse } from "cookie";
+
+/** Extract Bearer token from request (client sends this when cookies fail on Vercel) */
+function getBearerToken(request?: NextRequest): string | null {
+  if (!request || !("headers" in request)) return null;
+  const auth = (request as Request).headers.get("authorization");
+  if (!auth?.startsWith("Bearer ")) return null;
+  return auth.slice(7).trim() || null;
+}
 
 /** Parse Cookie header into Supabase-expected { name, value }[] */
 function getAllFromCookieHeader(cookieHeader: string | null): { name: string; value: string }[] {
@@ -13,6 +22,13 @@ function getAllFromCookieHeader(cookieHeader: string | null): { name: string; va
 export function createSupabaseServerClient(request?: NextRequest) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+  const token = getBearerToken(request);
+  if (token) {
+    return createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+  }
 
   return createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {

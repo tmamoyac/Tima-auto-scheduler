@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { apiFetch } from "@/lib/apiFetch";
 import { safeParseJson } from "@/lib/fetchJson";
 
 type Stats = {
@@ -36,13 +37,13 @@ export function SetupStatsCards({
     const yearParam = `academicYearId=${encodeURIComponent(academicYearId)}`;
 
     Promise.all([
-      fetch(`/api/admin/residents?${programParam}`, { cache: "no-store", credentials: "include" }),
-      fetch(`/api/admin/rotations?${programParam}`, { cache: "no-store", credentials: "include" }),
-      fetch(`/api/admin/vacation?${yearParam}&${programParam}`, {
+      apiFetch(`/api/admin/residents?${programParam}`, { cache: "no-store", credentials: "include" }),
+      apiFetch(`/api/admin/rotations?${programParam}`, { cache: "no-store", credentials: "include" }),
+      apiFetch(`/api/admin/vacation?${yearParam}&${programParam}`, {
         cache: "no-store",
         credentials: "include",
       }),
-      fetch(`/api/admin/requirements?${programParam}`, { cache: "no-store", credentials: "include" }),
+      apiFetch(`/api/admin/requirements?${programParam}`, { cache: "no-store", credentials: "include" }),
     ])
       .then(async ([residentsRes, rotationsRes, vacationRes, requirementsRes]) => {
         const [residents, rotations, vacation, requirements] = await Promise.all([

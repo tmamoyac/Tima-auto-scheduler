@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { apiFetch } from "@/lib/apiFetch";
 
 type Version = { id: string; version_name: string | null; is_final: boolean };
 
@@ -26,7 +27,7 @@ export function ScheduleVersionPicker({
     if (name === null) return;
     setRenaming(true);
     try {
-      const res = await fetch(`/api/admin/schedule-versions/${currentVersionId}?programId=${encodeURIComponent(programId)}`, {
+      const res = await apiFetch(`/api/admin/schedule-versions/${currentVersionId}?programId=${encodeURIComponent(programId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ version_name: name.trim() || null }),
@@ -45,7 +46,7 @@ export function ScheduleVersionPicker({
     if (!confirm("Mark this version as the final schedule?")) return;
     setMarkingFinal(true);
     try {
-      const res = await fetch(`/api/admin/schedule-versions/${currentVersionId}?programId=${encodeURIComponent(programId)}`, {
+      const res = await apiFetch(`/api/admin/schedule-versions/${currentVersionId}?programId=${encodeURIComponent(programId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_final: true }),

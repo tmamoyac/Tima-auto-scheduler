@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { apiFetch } from "@/lib/apiFetch";
 import { safeParseJson } from "@/lib/fetchJson";
 
 type Requirement = {
@@ -31,7 +32,7 @@ export function RequirementsSection({
   const [matrix, setMatrix] = useState<Record<string, Record<number, number>>>({});
 
   const loadReqs = async () => {
-    const res = await fetch(`/api/admin/requirements?programId=${encodeURIComponent(programId)}`, { cache: "no-store", credentials: "include" });
+    const res = await apiFetch(`/api/admin/requirements?programId=${encodeURIComponent(programId)}`, { cache: "no-store", credentials: "include" });
     const data = await safeParseJson<Requirement[] | { error?: string }>(res);
     if (!res.ok) throw new Error("error" in data ? data.error : "Failed to load requirements");
     if (Array.isArray(data)) {
@@ -61,12 +62,12 @@ export function RequirementsSection({
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const [resReqs, resRots] = await Promise.all([
-        fetch(`/api/admin/requirements?programId=${encodeURIComponent(programId)}`, {
+        apiFetch(`/api/admin/requirements?programId=${encodeURIComponent(programId)}`, {
           signal: controller.signal,
           cache: "no-store",
           credentials: "include",
         }),
-        fetch(`/api/admin/rotations?programId=${encodeURIComponent(programId)}`, {
+        apiFetch(`/api/admin/rotations?programId=${encodeURIComponent(programId)}`, {
           signal: controller.signal,
           cache: "no-store",
           credentials: "include",
@@ -127,7 +128,7 @@ export function RequirementsSection({
     setSaving(true);
     try {
       if (editing) {
-        const res = await fetch(`/api/admin/requirements/${editing.id}?programId=${encodeURIComponent(programId)}`, {
+        const res = await apiFetch(`/api/admin/requirements/${editing.id}?programId=${encodeURIComponent(programId)}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(form),
@@ -135,7 +136,7 @@ export function RequirementsSection({
         });
         if (!res.ok) throw new Error((await safeParseJson<{ error?: string }>(res)).error || "Failed");
       } else {
-        const res = await fetch(`/api/admin/requirements?programId=${encodeURIComponent(programId)}`, {
+        const res = await apiFetch(`/api/admin/requirements?programId=${encodeURIComponent(programId)}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ...form, program_id: programId }),
@@ -154,7 +155,7 @@ export function RequirementsSection({
 
   const deleteReq = async (id: string) => {
     if (!confirm("Delete this requirement?")) return;
-    const res = await fetch(`/api/admin/requirements/${id}?programId=${encodeURIComponent(programId)}`, {
+    const res = await apiFetch(`/api/admin/requirements/${id}?programId=${encodeURIComponent(programId)}`, {
       method: "DELETE",
       credentials: "include",
     });
@@ -184,7 +185,7 @@ export function RequirementsSection({
           min_months_required: matrix[rot.id]?.[pgy] ?? 0,
         }))
       );
-      const res = await fetch(`/api/admin/requirements?programId=${encodeURIComponent(programId)}`, {
+      const res = await apiFetch(`/api/admin/requirements?programId=${encodeURIComponent(programId)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ requirements: requirementsPayload }),

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { apiFetch } from "@/lib/apiFetch";
 import { safeParseJson } from "@/lib/fetchJson";
 import { ActionsMenu } from "./ActionsMenu";
 
@@ -45,7 +46,7 @@ export function VacationSection({
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/admin/vacation?academicYearId=${encodeURIComponent(academicYearId)}&programId=${encodeURIComponent(programId)}`,
         { signal: controller.signal, cache: "no-store", credentials: "include" }
       );
@@ -93,7 +94,7 @@ export function VacationSection({
     }
     setUpdating(true);
     try {
-      const res = await fetch(`/api/admin/vacation?programId=${encodeURIComponent(programId)}`, {
+      const res = await apiFetch(`/api/admin/vacation?programId=${encodeURIComponent(programId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -118,7 +119,7 @@ export function VacationSection({
     if (!confirm("Remove this vacation week?")) return;
     setUpdating(true);
     try {
-      const res = await fetch(`/api/admin/vacation?id=${encodeURIComponent(id)}&programId=${encodeURIComponent(programId)}`, {
+      const res = await apiFetch(`/api/admin/vacation?id=${encodeURIComponent(id)}&programId=${encodeURIComponent(programId)}`, {
         method: "DELETE",
         credentials: "include",
       });

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { apiFetch } from "@/lib/apiFetch";
 import { safeParseJson } from "@/lib/fetchJson";
 
 type Program = { id: string; name: string };
@@ -32,7 +33,7 @@ export function ResidencyAdminHeader({
     }
     let mounted = true;
     setFetchError(false);
-    fetch("/api/super-admin/programs?activeOnly=true", { credentials: "include" })
+    apiFetch("/api/super-admin/programs?activeOnly=true")
       .then(async (res) => {
         const data = await safeParseJson<Program[] | { error?: string }>(res);
         if (!res.ok) throw new Error("Failed");

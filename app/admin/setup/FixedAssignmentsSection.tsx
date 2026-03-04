@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { apiFetch } from "@/lib/apiFetch";
 import { safeParseJson } from "@/lib/fetchJson";
 import { ActionsMenu } from "./ActionsMenu";
 
@@ -50,15 +51,15 @@ export function FixedAssignmentsSection({
     setError(null);
     try {
       const [rulesRes, vacRes, rotsRes] = await Promise.all([
-        fetch(`/api/admin/fixed-assignment-rules?academicYearId=${encodeURIComponent(academicYearId)}&programId=${encodeURIComponent(programId)}`, {
+        apiFetch(`/api/admin/fixed-assignment-rules?academicYearId=${encodeURIComponent(academicYearId)}&programId=${encodeURIComponent(programId)}`, {
           cache: "no-store",
           credentials: "include",
         }),
-        fetch(`/api/admin/vacation?academicYearId=${encodeURIComponent(academicYearId)}&programId=${encodeURIComponent(programId)}`, {
+        apiFetch(`/api/admin/vacation?academicYearId=${encodeURIComponent(academicYearId)}&programId=${encodeURIComponent(programId)}`, {
           cache: "no-store",
           credentials: "include",
         }),
-        fetch(`/api/admin/rotations?programId=${encodeURIComponent(programId)}`, { cache: "no-store", credentials: "include" }),
+        apiFetch(`/api/admin/rotations?programId=${encodeURIComponent(programId)}`, { cache: "no-store" }),
       ]);
       const rulesData = await safeParseJson<Rule[] | { error?: string }>(rulesRes);
       const vacData = await safeParseJson<{ error?: string; residents?: Resident[]; months?: Month[] }>(vacRes);
@@ -98,7 +99,7 @@ export function FixedAssignmentsSection({
     }
     setSaving(true);
     try {
-      const res = await fetch(`/api/admin/fixed-assignment-rules?programId=${encodeURIComponent(programId)}`, {
+      const res = await apiFetch(`/api/admin/fixed-assignment-rules?programId=${encodeURIComponent(programId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -125,7 +126,7 @@ export function FixedAssignmentsSection({
     if (!confirm("Remove this fixed assignment rule?")) return;
     setSaving(true);
     try {
-      const res = await fetch(`/api/admin/fixed-assignment-rules?id=${encodeURIComponent(id)}&programId=${encodeURIComponent(programId)}`, {
+      const res = await apiFetch(`/api/admin/fixed-assignment-rules?id=${encodeURIComponent(id)}&programId=${encodeURIComponent(programId)}`, {
         method: "DELETE",
         credentials: "include",
       });
