@@ -28,6 +28,7 @@ function getBearerToken(): string | null {
  * - Otherwise a cookie-based @supabase/ssr client is returned that reads
  *   and writes auth cookies through Next.js's cookies() store.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for backwards compat with callers that pass request
 export function createSupabaseServerClient(_request?: unknown) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
