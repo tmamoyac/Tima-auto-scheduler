@@ -265,7 +265,20 @@ export function SuperAdminContent() {
   };
 
   if (loading) return <p className="text-gray-600">Loading…</p>;
-  if (error) return <p className="text-red-600">{error}</p>;
+  if (error)
+    return (
+      <div className="text-red-600 space-y-2">
+        <p>{error}</p>
+        {(error === "Unauthorized" || error === "Forbidden") && (
+          <p className="text-sm text-gray-600">
+            <a href="/logout" className="underline hover:no-underline">Log out and log in again</a>
+            {". "}
+            Super admins: ensure your email is in{" "}
+            <code className="bg-gray-100 px-1 rounded">SUPER_ADMIN_EMAILS</code> (Vercel env vars).
+          </p>
+        )}
+      </div>
+    );
 
   return (
     <div className="space-y-6">

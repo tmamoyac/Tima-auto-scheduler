@@ -11,9 +11,11 @@ export async function apiFetch(
   init?: RequestInit
 ): Promise<Response> {
   const supabase = createSupabaseBrowserClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  let session = (await supabase.auth.getSession()).data.session;
+  if (!session?.access_token) {
+    const { data } = await supabase.auth.refreshSession();
+    session = data.session;
+  }
   const headers = new Headers(init?.headers);
   if (session?.access_token) {
     headers.set("Authorization", `Bearer ${session.access_token}`);
