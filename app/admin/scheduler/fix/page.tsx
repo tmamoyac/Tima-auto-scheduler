@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { requireDirectorContext } from "@/lib/auth/directorContext";
 
@@ -135,9 +134,9 @@ export default async function FixPage() {
           <p className="text-sm text-green-700 mt-1">
             Go back to the scheduler and click &quot;Generate new schedule&quot; again.
           </p>
-          <Link href="/admin/scheduler" className="inline-block mt-3 text-blue-600 underline">
+          <a href="/admin/scheduler" className="inline-block mt-3 text-blue-600 underline">
             Back to Scheduler
-          </Link>
+          </a>
         </div>
       ) : result.needTables ? (
         <div className="space-y-4">
@@ -156,9 +155,9 @@ export default async function FixPage() {
           <p className="text-sm text-gray-600">
             After it says &quot;Success&quot;, go back to the Scheduler and click &quot;Generate new schedule&quot; again.
           </p>
-          <Link href="/admin/scheduler" className="inline-block mt-2 text-blue-600 underline">
+          <a href="/admin/scheduler" className="inline-block mt-2 text-blue-600 underline">
             Back to Scheduler
-          </Link>
+          </a>
         </div>
       ) : (
         <div className="p-4 rounded bg-red-50 border border-red-200">
@@ -166,9 +165,9 @@ export default async function FixPage() {
           <p className="text-sm text-red-700 mt-1">
             Fix the failed check above (read the detail). If &quot;Academic year&quot; failed, run the seed script or add an academic year in Supabase.
           </p>
-          <Link href="/admin/scheduler" className="inline-block mt-3 text-blue-600 underline">
+          <a href="/admin/scheduler" className="inline-block mt-3 text-blue-600 underline">
             Back to Scheduler
-          </Link>
+          </a>
         </div>
       )}
     </div>

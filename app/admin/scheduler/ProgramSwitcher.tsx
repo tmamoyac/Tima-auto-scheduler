@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/apiFetch";
 import { safeParseJson } from "@/lib/fetchJson";
@@ -14,7 +13,6 @@ export function ProgramSwitcher({
   programId: string;
   currentTab: string;
 }) {
-  const router = useRouter();
   const [programs, setPrograms] = useState<Program[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
@@ -45,13 +43,7 @@ export function ProgramSwitcher({
     };
   }, []);
 
-  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const selected = e.target.value;
-    if (!selected) return;
-    const tab = currentTab === "setup" || currentTab === "schedule" ? currentTab : "schedule";
-    const url = `/admin/scheduler?tab=${tab}&programId=${encodeURIComponent(selected)}`;
-    router.push(url);
-  };
+  const tab = currentTab === "setup" || currentTab === "schedule" ? currentTab : "schedule";
 
   return (
     <div className="flex items-center gap-2 mb-4">
@@ -78,13 +70,27 @@ export function ProgramSwitcher({
       <label htmlFor="program-switcher" className="text-sm font-medium text-gray-700">
         Program:
       </label>
-      <select
-        id="program-switcher"
-        value={programId}
-        onChange={handleChange}
-        disabled={loading || programs.length === 0}
-        className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium bg-white min-w-[220px] focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:opacity-60 disabled:cursor-not-allowed"
+      <form
+        method="get"
+        action="/admin/scheduler"
+        className="inline-block"
+        onSubmit={(e) => e.preventDefault()}
       >
+        <input type="hidden" name="tab" value={tab} />
+        <select
+          id="program-switcher"
+          name="programId"
+          key={programId}
+          defaultValue={programId}
+          onChange={(e) => {
+            const selected = e.target.value;
+            if (!selected) return;
+            const params = new URLSearchParams({ tab, programId: selected });
+            window.location.assign(`/admin/scheduler?${params.toString()}`);
+          }}
+          disabled={loading || programs.length === 0}
+          className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium bg-white min-w-[220px] focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:opacity-60 disabled:cursor-not-allowed"
+        >
         {loading ? (
           <option value="">Loading programs…</option>
         ) : fetchError ? (
@@ -99,6 +105,7 @@ export function ProgramSwitcher({
           ))
         )}
       </select>
+      </form>
       {(loading || fetchError || programs.length === 0) && (
         <span className="text-xs text-gray-500 ml-1">
           {loading ? "Loading…" : fetchError ? "Check Super Admin login" : "No programs"}

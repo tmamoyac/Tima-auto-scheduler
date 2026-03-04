@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { apiFetch } from "@/lib/apiFetch";
 import { safeParseJson } from "@/lib/fetchJson";
 
@@ -148,7 +147,7 @@ export function SetupStatsCards({
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
       {cards.map((card) => (
-        <Link
+        <a
           key={card.title}
           href={card.href}
           className="flex flex-col p-4 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow-md hover:border-gray-300 transition-all no-underline text-gray-900"
@@ -159,7 +158,7 @@ export function SetupStatsCards({
           </div>
           <p className="text-2xl font-bold mt-2">{card.value}</p>
           <p className="text-sm font-medium text-gray-600">{card.title}</p>
-        </Link>
+        </a>
       ))}
     </div>
   );

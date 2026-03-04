@@ -3,6 +3,7 @@ import localFont from "next/font/local";
 import "./globals.css";
 import { TopNav } from "./TopNav";
 import { AuthCallbackRedirect } from "./AuthCallbackRedirect";
+import { TokenHydration } from "./TokenHydration";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { hasSuperAdminAccess } from "@/lib/auth/superAdmin";
 
@@ -41,6 +42,7 @@ export default async function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <AuthCallbackRedirect />
+        <TokenHydration />
         <TopNav showSuperAdmin={showSuperAdmin} />
         {children}
       </body>

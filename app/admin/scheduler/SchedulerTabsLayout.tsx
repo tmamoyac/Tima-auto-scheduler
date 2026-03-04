@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo } from "react";
 import { ResidencyAdminHeader } from "./ResidencyAdminHeader";
 import { ResidencyAdminPage } from "./ResidencyAdminPage";
@@ -47,7 +46,7 @@ export function SchedulerTabsLayout({
         <div className="max-w-7xl w-full mx-auto px-6 pt-6">
           <div className="flex gap-1 p-1.5 rounded-xl bg-gray-200 border border-gray-200 max-w-fit">
             {tabs.map((tab) => (
-              <Link
+              <a
                 key={tab.id}
                 href={tabHref(tab.id)}
                 className={`px-6 py-3 text-base font-semibold rounded-lg transition-all no-underline block ${
@@ -57,7 +56,7 @@ export function SchedulerTabsLayout({
                 }`}
               >
                 {tab.label}
-              </Link>
+              </a>
             ))}
           </div>
         </div>

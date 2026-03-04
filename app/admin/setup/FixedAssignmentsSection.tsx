@@ -37,7 +37,7 @@ export function FixedAssignmentsSection({
   const [form, setForm] = useState({ resident_id: "", month_id: "", rotation_id: "" });
 
   const loadRules = useCallback(async () => {
-    const res = await fetch(
+    const res = await apiFetch(
       `/api/admin/fixed-assignment-rules?academicYearId=${encodeURIComponent(academicYearId)}&programId=${encodeURIComponent(programId)}`,
       { cache: "no-store", credentials: "include" }
     );

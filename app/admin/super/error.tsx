@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect } from "react";
-import Link from "next/link";
 
 export default function SuperAdminError({
   error,
@@ -31,12 +30,12 @@ export default function SuperAdminError({
           >
             Try again
           </button>
-          <Link
+          <a
             href="/admin/scheduler"
-            className="px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium hover:bg-gray-100"
+            className="inline-block px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium hover:bg-gray-100 no-underline text-gray-900"
           >
             Back to Scheduler
-          </Link>
+          </a>
         </div>
       </div>
     </div>

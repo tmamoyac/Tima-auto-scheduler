@@ -1,11 +1,9 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { apiFetch } from "@/lib/apiFetch";
 
 export function GenerateScheduleButton({ programId }: { programId: string }) {
-  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -41,7 +39,7 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
         return;
       }
       setMessage({ type: "success", text: "Schedule created! Refreshing…" });
-      router.refresh();
+      window.location.reload();
     } catch (e) {
       setMessage({ type: "error", text: e instanceof Error ? e.message : "Request failed" });
     } finally {

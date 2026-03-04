@@ -2,7 +2,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getSchedulerContext } from "@/lib/auth/schedulerContext";
-import Link from "next/link";
 import { GenerateScheduleButton } from "./GenerateScheduleButton";
 import { ScheduleVersionPicker } from "./ScheduleVersionPicker";
 import { SchedulerRefreshButton } from "./SchedulerRefreshButton";
@@ -309,9 +308,9 @@ export default async function SchedulerPage({
             programId={programId}
           />
         )}
-        <Link href="/admin/scheduler/fix" className="text-sm text-blue-600 underline ml-auto">
+        <a href="/admin/scheduler/fix" className="text-sm text-blue-600 underline ml-auto">
           Generate not working? Click here to fix it.
-        </Link>
+        </a>
       </div>
     </SchedulerTabsLayout>
   );

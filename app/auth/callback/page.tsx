@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 function parseHashParams(): Record<string, string> {
@@ -11,7 +10,6 @@ function parseHashParams(): Record<string, string> {
 }
 
 export default function AuthCallbackPage() {
-  const router = useRouter();
   const [status, setStatus] = useState<"loading" | "recovery" | "done" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
   const [password, setPassword] = useState("");
@@ -40,13 +38,13 @@ export default function AuthCallbackPage() {
     }
 
     if (accessToken) {
-      router.replace("/admin/scheduler?tab=setup");
+      window.location.replace("/admin/scheduler?tab=setup");
       return;
     }
 
     setStatus("error");
     setError(params.error_description?.replace(/\+/g, " ") || "Invalid or expired link.");
-  }, [router]);
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -61,7 +59,7 @@ export default function AuthCallbackPage() {
       const { error: updateError } = await supabase.auth.updateUser({ password });
       if (updateError) throw updateError;
       setStatus("done");
-      setTimeout(() => router.replace("/login"), 1500);
+      setTimeout(() => { window.location.replace("/login"); }, 1500);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update password");
     } finally {

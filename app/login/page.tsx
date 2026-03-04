@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { TimaLogo } from "@/app/components/TimaLogo";
 
 const TOKEN_KEY = "tima_access_token";
@@ -41,16 +40,11 @@ export default function LoginPage() {
       };
       if (!res.ok) throw new Error(data.error ?? "Login failed");
 
-      // Store token for apiFetch (bypasses Supabase storage issues on Vercel)
-      if (data.access_token) {
-        if (typeof window !== "undefined") {
-          window.sessionStorage.setItem(TOKEN_KEY, data.access_token);
-        }
-        const supabase = createSupabaseBrowserClient();
-        await supabase.auth.setSession({
-          access_token: data.access_token,
-          refresh_token: data.refresh_token || "",
-        });
+      // Store token in sessionStorage for apiFetch (Bearer token fallback).
+      // Auth cookies are set by the server's Set-Cookie response headers —
+      // do NOT call setSession() here as it creates conflicting cookies.
+      if (data.access_token && typeof window !== "undefined") {
+        window.sessionStorage.setItem(TOKEN_KEY, data.access_token);
       }
 
       window.location.href = nextUrl;

@@ -1,7 +1,4 @@
 "use client";
-
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/apiFetch";
 import { safeParseJson } from "@/lib/fetchJson";
@@ -21,7 +18,6 @@ export function ResidencyAdminHeader({
   showSuperAdminLink?: boolean;
   programName?: string;
 }) {
-  const router = useRouter();
   const [programs, setPrograms] = useState<Program[]>([]);
   const [loading, setLoading] = useState(isSuperAdmin);
   const [fetchError, setFetchError] = useState(false);
@@ -56,13 +52,7 @@ export function ResidencyAdminHeader({
     };
   }, [isSuperAdmin]);
 
-  const handleProgramChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const selected = e.target.value;
-    if (!selected) return;
-    const tab = currentTab === "setup" || currentTab === "schedule" ? currentTab : "schedule";
-    const url = `/admin/scheduler?tab=${tab}&programId=${encodeURIComponent(selected)}`;
-    router.push(url);
-  };
+  const tab = currentTab === "setup" || currentTab === "schedule" ? currentTab : "schedule";
 
   const currentProgramName =
     programName ??
@@ -76,13 +66,29 @@ export function ResidencyAdminHeader({
           <div className="flex flex-col gap-1">
             <h1 className="text-lg font-semibold text-gray-900">Cassava Health</h1>
             {isSuperAdmin ? (
-              <select
-                id="program-selector"
-                value={programId}
-                onChange={handleProgramChange}
-                disabled={loading || programs.length === 0}
-                className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium bg-white min-w-[220px] focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:opacity-60 disabled:cursor-not-allowed text-gray-700"
+              <form
+                method="get"
+                action="/admin/scheduler"
+                className="inline-block"
+                onSubmit={(e) => e.preventDefault()}
               >
+                <input type="hidden" name="tab" value={tab} />
+                <select
+                  id="program-selector"
+                  name="programId"
+                  key={programId}
+                  defaultValue={programId}
+                  onChange={(e) => {
+                    const form = e.currentTarget.form;
+                    if (!form) return;
+                    const selected = e.target.value;
+                    if (!selected) return;
+                    const params = new URLSearchParams({ tab, programId: selected });
+                    window.location.assign(`${form.action}?${params.toString()}`);
+                  }}
+                  disabled={loading || programs.length === 0}
+                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium bg-white min-w-[220px] focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:opacity-60 disabled:cursor-not-allowed text-gray-700"
+                >
                 {loading ? (
                   <option value="">Loading programs…</option>
                 ) : fetchError ? (
@@ -97,6 +103,7 @@ export function ResidencyAdminHeader({
                   ))
                 )}
               </select>
+              </form>
             ) : (
               <p className="text-sm text-gray-600">{currentProgramName}</p>
             )}
@@ -123,19 +130,21 @@ export function ResidencyAdminHeader({
               A
             </div>
             {showSuperAdminLink && (
-              <Link
+              <a
                 href="/admin/super"
                 className="text-sm font-semibold text-gray-700 hover:text-gray-900 hover:underline"
               >
                 Super Admin
-              </Link>
+              </a>
             )}
-            <Link
-              href="/logout"
-              className="text-sm font-semibold text-gray-700 hover:text-gray-900 hover:underline"
-            >
-              Log out
-            </Link>
+            <form action="/logout" method="post" className="inline">
+              <button
+                type="submit"
+                className="text-sm font-semibold text-gray-700 hover:text-gray-900 hover:underline bg-transparent border-none cursor-pointer p-0"
+              >
+                Log out
+              </button>
+            </form>
           </div>
         </div>
       </div>

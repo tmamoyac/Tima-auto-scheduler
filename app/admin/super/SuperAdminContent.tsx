@@ -271,7 +271,9 @@ export function SuperAdminContent() {
         <p>{error}</p>
         {(error === "Unauthorized" || error === "Forbidden") && (
           <p className="text-sm text-gray-600">
-            <a href="/logout" className="underline hover:no-underline">Log out and log in again</a>
+            <form action="/logout" method="post" className="inline">
+              <button type="submit" className="underline hover:no-underline bg-transparent border-none cursor-pointer p-0 text-sm text-gray-600">Log out and log in again</button>
+            </form>
             {". "}
             Super admins: ensure your email is in{" "}
             <code className="bg-gray-100 px-1 rounded">SUPER_ADMIN_EMAILS</code> (Vercel env vars).

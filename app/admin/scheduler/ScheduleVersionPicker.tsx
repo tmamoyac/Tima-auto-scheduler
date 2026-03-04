@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { apiFetch } from "@/lib/apiFetch";
 
@@ -15,7 +14,6 @@ export function ScheduleVersionPicker({
   currentVersionId: string | null;
   programId: string;
 }) {
-  const router = useRouter();
   const [renaming, setRenaming] = useState(false);
   const [markingFinal, setMarkingFinal] = useState(false);
 
@@ -34,7 +32,7 @@ export function ScheduleVersionPicker({
         credentials: "include",
       });
       if (!res.ok) throw new Error((await res.json()).error);
-      router.refresh();
+      window.location.reload();
     } catch (e) {
       alert(String(e));
     }
@@ -53,7 +51,7 @@ export function ScheduleVersionPicker({
         credentials: "include",
       });
       if (!res.ok) throw new Error((await res.json()).error);
-      router.refresh();
+      window.location.reload();
     } catch (e) {
       alert(String(e));
     }
@@ -65,7 +63,7 @@ export function ScheduleVersionPicker({
     const params = new URLSearchParams(window.location.search);
     params.set("versionId", versionId);
     params.set("programId", programId);
-    router.push(`${window.location.pathname}?${params.toString()}`);
+    window.location.href = `${window.location.pathname}?${params.toString()}`;
   };
 
   if (versions.length === 0) return null;
