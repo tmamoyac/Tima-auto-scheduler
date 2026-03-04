@@ -1,15 +1,27 @@
 import type { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { parse } from "cookie";
 
-/** Extract Bearer token from request (client sends this when cookies fail on Vercel) */
+/** Extract Bearer token from request. Checks Authorization + X-Tima-Token (fallback if Auth header stripped). */
 function getBearerToken(request?: NextRequest): string | null {
-  if (!request || !("headers" in request)) return null;
-  const auth = (request as Request).headers.get("authorization");
-  if (!auth?.startsWith("Bearer ")) return null;
-  return auth.slice(7).trim() || null;
+  const getAuth = (h: Headers | null) => {
+    if (!h) return null;
+    const auth = h.get("authorization");
+    if (auth?.startsWith("Bearer ")) return auth.slice(7).trim() || null;
+    const x = h.get("x-tima-token");
+    return x?.trim() || null;
+  };
+  let token = request && "headers" in request ? getAuth((request as Request).headers) : null;
+  if (!token) {
+    try {
+      token = getAuth(headers());
+    } catch {
+      /* ignore */
+    }
+  }
+  return token;
 }
 
 /** Parse Cookie header into Supabase-expected { name, value }[] */

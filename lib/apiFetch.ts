@@ -31,6 +31,7 @@ export async function apiFetch(
   const headers = new Headers(init?.headers);
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
+    headers.set("X-Tima-Token", token);
   }
   const res = await fetch(input, { ...init, headers, credentials: "include" });
   if (res.status === 401 && typeof window !== "undefined") {
