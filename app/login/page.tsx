@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { TimaLogo } from "@/app/components/TimaLogo";
 
 export default function LoginPage() {
@@ -25,8 +26,21 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
         credentials: "include",
       });
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        access_token?: string;
+        refresh_token?: string;
+      };
       if (!res.ok) throw new Error(data.error ?? "Login failed");
+
+      // Sync session to browser client so apiFetch can send Bearer token
+      if (data.access_token && data.refresh_token) {
+        const supabase = createSupabaseBrowserClient();
+        await supabase.auth.setSession({
+          access_token: data.access_token,
+          refresh_token: data.refresh_token,
+        });
+      }
 
       window.location.href = nextUrl;
       return;

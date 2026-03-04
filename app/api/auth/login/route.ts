@@ -16,11 +16,18 @@ export async function POST(request: Request) {
   }
 
   const supabase = createSupabaseServerClient(request as NextRequest);
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 401 });
   }
-
-  return NextResponse.json({ ok: true });
+  // Return session so client can sync to browser storage (for apiFetch Bearer token)
+  const session = data?.session;
+  return NextResponse.json({
+    ok: true,
+    ...(session && {
+      access_token: session.access_token,
+      refresh_token: session.refresh_token,
+    }),
+  });
 }
 
