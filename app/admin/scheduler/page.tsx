@@ -35,26 +35,35 @@ async function getContext(
       programIdOverride,
       academicYearIdOverride
     );
-    if (!ctx.academicYearId) return null;
-    const [programRes, yearRes] = await Promise.all([
-      supabaseAdmin
-        .from("programs")
-        .select("name")
-        .eq("id", ctx.programId)
-        .maybeSingle(),
-      supabaseAdmin
+    // Super admin can stay on a program even when it has no academic year (e.g. UCI just added)
+    const allowNoAcademicYear = ctx.isSuperAdmin && ctx.programId;
+    if (!ctx.academicYearId && !allowNoAcademicYear) return null;
+
+    const programRes = await supabaseAdmin
+      .from("programs")
+      .select("name")
+      .eq("id", ctx.programId)
+      .maybeSingle();
+    const programName = (programRes.data as { name?: string } | null)?.name;
+
+    let academicYearStart = "";
+    let academicYearEnd = "";
+    const academicYearId = ctx.academicYearId ?? "";
+
+    if (ctx.academicYearId) {
+      const yearRes = await supabaseAdmin
         .from("academic_years")
         .select("start_date, end_date")
         .eq("id", ctx.academicYearId)
-        .maybeSingle(),
-    ]);
-    const programName = (programRes.data as { name?: string } | null)?.name;
-    const year = yearRes.data as { start_date?: string; end_date?: string; label?: string } | null;
-    const academicYearStart = year?.start_date ?? "";
-    const academicYearEnd = year?.end_date ?? "";
+        .maybeSingle();
+      const year = yearRes.data as { start_date?: string; end_date?: string } | null;
+      academicYearStart = year?.start_date ?? "";
+      academicYearEnd = year?.end_date ?? "";
+    }
+
     return {
       programId: ctx.programId,
-      academicYearId: ctx.academicYearId,
+      academicYearId,
       programName,
       academicYearStart,
       academicYearEnd,

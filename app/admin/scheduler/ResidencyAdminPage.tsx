@@ -1,5 +1,6 @@
 "use client";
 
+import { AcademicYearSection } from "../setup/AcademicYearSection";
 import { ResidentsSection } from "../setup/ResidentsSection";
 import { RotationsSection } from "../setup/RotationsSection";
 import { VacationSection } from "../setup/VacationSection";
@@ -22,6 +23,15 @@ export function ResidencyAdminPage({
 }) {
   return (
     <div className="max-w-7xl mx-auto px-8 py-8">
+      <div id="section-academic-year" className={`${cardClass} scroll-mt-4 mb-6`}>
+        <h2 className="text-lg font-semibold text-gray-900 mb-2">Academic year</h2>
+        <AcademicYearSection
+          programId={programId}
+          academicYearId={academicYearId}
+          academicYearStart={academicYearStart}
+          academicYearEnd={academicYearEnd}
+        />
+      </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="flex flex-col gap-6">
           <div id="section-residents" className={`${cardClass} scroll-mt-4`}>
