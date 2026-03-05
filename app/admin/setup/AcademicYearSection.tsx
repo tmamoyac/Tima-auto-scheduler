@@ -38,8 +38,13 @@ export function AcademicYearSection({
   const [years, setYears] = useState<AcademicYear[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingYear, setEditingYear] = useState<AcademicYear | null>(null);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [editLabel, setEditLabel] = useState("");
+  const [editStartDate, setEditStartDate] = useState("");
+  const [editEndDate, setEditEndDate] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -112,6 +117,61 @@ export function AcademicYearSection({
     window.location.href = `${window.location.pathname}?${params.toString()}`;
   };
 
+  const openEditModal = (y: AcademicYear) => {
+    setEditingYear(y);
+    setEditLabel(y.label ?? "");
+    setEditStartDate(y.start_date ?? "");
+    setEditEndDate(y.end_date ?? "");
+    setError(null);
+    setEditModalOpen(true);
+  };
+
+  const closeEditModal = () => {
+    setEditModalOpen(false);
+    setEditingYear(null);
+    setError(null);
+  };
+
+  const saveEdit = async () => {
+    if (!editingYear) return;
+    if (!editStartDate || !editEndDate) {
+      setError("Start and end dates are required.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await apiFetch(
+        `/api/admin/academic-years/${encodeURIComponent(editingYear.id)}?programId=${encodeURIComponent(programId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            label: editLabel.trim() || undefined,
+            start_date: editStartDate,
+            end_date: editEndDate,
+          }),
+          credentials: "include",
+        }
+      );
+      const data = await safeParseJson<AcademicYear | { error?: string }>(res);
+      if (!res.ok) throw new Error("error" in data ? data.error : "Failed to update");
+      closeEditModal();
+      await loadYears();
+      if (editingYear.id === currentYearId) {
+        const params = new URLSearchParams(window.location.search);
+        params.set("tab", "setup");
+        params.set("programId", programId);
+        params.set("academicYearId", editingYear.id);
+        window.location.href = `${window.location.pathname}?${params.toString()}`;
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to update academic year");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <>
       <div className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3">
@@ -146,15 +206,24 @@ export function AcademicYearSection({
                   <span className="ml-2 text-indigo-600 font-medium">(current)</span>
                 )}
               </span>
-              {y.id !== currentYearId && (
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => switchToYear(y.id)}
-                  className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+                  onClick={() => openEditModal(y)}
+                  className="text-sm text-gray-600 hover:text-gray-900 font-medium"
                 >
-                  Use this year
+                  Edit
                 </button>
-              )}
+                {y.id !== currentYearId && (
+                  <button
+                    type="button"
+                    onClick={() => switchToYear(y.id)}
+                    className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+                  >
+                    Use this year
+                  </button>
+                )}
+              </div>
             </li>
           ))}
         </ul>
@@ -202,6 +271,66 @@ export function AcademicYearSection({
               <button
                 type="button"
                 onClick={() => setModalOpen(false)}
+                disabled={saving}
+                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-sm font-medium rounded-lg"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editModalOpen && editingYear && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Edit academic year</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Change label or start/end dates. Dates must span 11–13 months and not overlap other years.
+            </p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Label (optional)</label>
+                <input
+                  type="text"
+                  value={editLabel}
+                  onChange={(e) => setEditLabel(e.target.value)}
+                  placeholder="e.g. 2025-2026"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Start date</label>
+                <input
+                  type="date"
+                  value={editStartDate}
+                  onChange={(e) => setEditStartDate(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">End date</label>
+                <input
+                  type="date"
+                  value={editEndDate}
+                  onChange={(e) => setEditEndDate(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                />
+              </div>
+              {error && <p className="text-sm text-red-600">{error}</p>}
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button
+                type="button"
+                onClick={saveEdit}
+                disabled={saving || !editStartDate || !editEndDate}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg"
+              >
+                {saving ? "Saving…" : "Save"}
+              </button>
+              <button
+                type="button"
+                onClick={closeEditModal}
                 disabled={saving}
                 className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-sm font-medium rounded-lg"
               >
