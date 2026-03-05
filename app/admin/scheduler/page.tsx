@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { Suspense } from "react";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getSchedulerContext } from "@/lib/auth/schedulerContext";
@@ -238,17 +239,19 @@ export default async function SchedulerPage({
   // Setup tab: skip schedule data fetches so the page loads immediately
   if (tabParam === "setup") {
     return (
-      <SchedulerTabsLayout
-        programId={programId}
-        academicYearId={academicYearId}
-        programName={programName}
-        academicYearStart={academicYearStart}
-        academicYearEnd={academicYearEnd}
-        initialTab="setup"
-        isSuperAdmin={isSuperAdmin}
-      >
-        <p className="text-sm text-gray-500">Switch to Schedule tab to view the schedule.</p>
-      </SchedulerTabsLayout>
+      <Suspense fallback={<div className="p-6 text-gray-500">Loading…</div>}>
+        <SchedulerTabsLayout
+          programId={programId}
+          academicYearId={academicYearId}
+          programName={programName}
+          academicYearStart={academicYearStart}
+          academicYearEnd={academicYearEnd}
+          initialTab="setup"
+          isSuperAdmin={isSuperAdmin}
+        >
+          <p className="text-sm text-gray-500">Switch to Schedule tab to view the schedule.</p>
+        </SchedulerTabsLayout>
+      </Suspense>
     );
   }
 
@@ -287,15 +290,16 @@ export default async function SchedulerPage({
   const selectedVersion = versions.find((v) => v.id === selectedVersionId);
 
   return (
-    <SchedulerTabsLayout
-      programId={programId}
-      academicYearId={academicYearId}
-      programName={programName}
+    <Suspense fallback={<div className="p-6 text-gray-500">Loading…</div>}>
+      <SchedulerTabsLayout
+        programId={programId}
+        academicYearId={academicYearId}
+        programName={programName}
         academicYearStart={academicYearStart}
         academicYearEnd={academicYearEnd}
         initialTab={tabParam}
-      isSuperAdmin={isSuperAdmin}
-    >
+        isSuperAdmin={isSuperAdmin}
+      >
       <h1 className="text-2xl font-semibold mb-4">Scheduler</h1>
       <p className="text-sm text-gray-600 mb-2">
         Residents: {residents.length} · Months: {months.length}
@@ -371,5 +375,6 @@ export default async function SchedulerPage({
         </a>
       </div>
     </SchedulerTabsLayout>
+    </Suspense>
   );
 }
