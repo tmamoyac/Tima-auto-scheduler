@@ -20,6 +20,14 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* Inputs use white/light backgrounds; always use dark text for readability.
+   Prevents transparent/invisible text when OS is in dark mode. */
+input,
+textarea,
+select {
+  color: #171717;
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;
