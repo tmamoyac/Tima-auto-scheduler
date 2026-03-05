@@ -22,13 +22,24 @@ function formatRange(start: string, end: string): string {
   return sameMonth ? `${s.toLocaleDateString("en-US", { month: "short" })} ${s.getDate()}-${e.getDate()}` : `${startStr}-${endStr}`;
 }
 
+function formatYearRangeShort(start: string, end: string): string {
+  if (!start || !end) return "";
+  const s = new Date(start + "T12:00:00");
+  const e = new Date(end + "T12:00:00");
+  return `${s.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} – ${e.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+}
+
 export function VacationSection({
   programId,
   academicYearId,
+  academicYearStart,
+  academicYearEnd,
   variant = "default",
 }: {
   programId: string;
   academicYearId: string;
+  academicYearStart: string;
+  academicYearEnd: string;
   variant?: "default" | "minimal";
 }) {
   const [residents, setResidents] = useState<Resident[]>([]);
@@ -92,18 +103,29 @@ export function VacationSection({
       alert("Start date must be before or equal to end date.");
       return;
     }
+    if (academicYearStart && academicYearEnd) {
+      if (newStart < academicYearStart || newEnd > academicYearEnd) {
+        alert(
+          `Vacation dates must be within the academic year (${formatYearRangeShort(academicYearStart, academicYearEnd)}).`
+        );
+        return;
+      }
+    }
     setUpdating(true);
     try {
-      const res = await apiFetch(`/api/admin/vacation?programId=${encodeURIComponent(programId)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          resident_id: residentId,
-          start_date: newStart,
-          end_date: newEnd,
-        }),
-      });
+      const res = await apiFetch(
+        `/api/admin/vacation?programId=${encodeURIComponent(programId)}&academicYearId=${encodeURIComponent(academicYearId)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            resident_id: residentId,
+            start_date: newStart,
+            end_date: newEnd,
+          }),
+        }
+      );
       if (!res.ok) throw new Error((await safeParseJson<{ error?: string }>(res)).error || "Failed");
       setAddingFor(null);
       setNewStart("");
@@ -137,7 +159,8 @@ export function VacationSection({
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
           <h2 className="text-lg font-semibold text-gray-900">Vacation Requests</h2>
           <p className="text-sm text-gray-500">
-            Add vacation weeks per resident. Each range is up to 14 days.
+            Add vacation weeks per resident. Dates must be within the academic year (
+            {formatYearRangeShort(academicYearStart, academicYearEnd)}). Each range is up to 14 days.
           </p>
         </div>
         {loading ? (
@@ -191,6 +214,8 @@ export function VacationSection({
                           <input
                             type="date"
                             value={newStart}
+                            min={academicYearStart || undefined}
+                            max={academicYearEnd || undefined}
                             onChange={(e) => setNewStart(e.target.value)}
                             className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
                           />
@@ -198,6 +223,8 @@ export function VacationSection({
                           <input
                             type="date"
                             value={newEnd}
+                            min={academicYearStart || undefined}
+                            max={academicYearEnd || undefined}
                             onChange={(e) => setNewEnd(e.target.value)}
                             className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
                           />
@@ -237,7 +264,8 @@ export function VacationSection({
     <section className="mb-10">
       <h2 className="text-xl font-semibold mb-3">Vacation requests</h2>
       <p className="text-sm text-gray-600 mb-2">
-        Add vacation weeks per resident (e.g. Nov 3-7, Jan 12-16). Each range is up to 14 days.
+        Add vacation weeks per resident. Dates must be within the academic year (
+        {formatYearRangeShort(academicYearStart, academicYearEnd)}). Each range is up to 14 days.
       </p>
       {loading ? (
         <p className="text-sm text-gray-500">Loading…</p>
@@ -278,6 +306,8 @@ export function VacationSection({
                       <input
                         type="date"
                         value={newStart}
+                        min={academicYearStart || undefined}
+                        max={academicYearEnd || undefined}
                         onChange={(e) => setNewStart(e.target.value)}
                         className="border border-gray-300 rounded px-2 py-1 text-sm"
                       />
@@ -285,6 +315,8 @@ export function VacationSection({
                       <input
                         type="date"
                         value={newEnd}
+                        min={academicYearStart || undefined}
+                        max={academicYearEnd || undefined}
                         onChange={(e) => setNewEnd(e.target.value)}
                         className="border border-gray-300 rounded px-2 py-1 text-sm"
                       />

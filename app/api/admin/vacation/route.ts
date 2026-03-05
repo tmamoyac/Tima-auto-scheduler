@@ -2,10 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { directorAuthErrorResponse } from "@/lib/auth/directorContext";
-import { getProgramContextForRequest, getProgramIdFromRequest } from "@/lib/auth/schedulerContext";
+import {
+  getAcademicYearIdFromRequest,
+  getProgramContextForRequest,
+  getProgramIdFromRequest,
+} from "@/lib/auth/schedulerContext";
 
 export async function GET(request: NextRequest) {
-  const academicYearId = request.nextUrl.searchParams.get("academicYearId");
+  const academicYearId = getAcademicYearIdFromRequest(request.nextUrl.searchParams);
   if (!academicYearId) {
     return NextResponse.json({ error: "academicYearId required" }, { status: 400 });
   }
@@ -54,12 +58,17 @@ export async function GET(request: NextRequest) {
   }
 
   const residentIds = (residents ?? []).map((r) => r.id);
+  const yearStart = (yearRow as { start_date?: string })?.start_date ?? "";
+  const yearEnd = (yearRow as { end_date?: string })?.end_date ?? "";
+
   let vacationRows: { id: string; resident_id: string; start_date: string; end_date: string }[] = [];
-  if (residentIds.length > 0) {
+  if (residentIds.length > 0 && yearStart && yearEnd) {
     const { data, error: vacErr } = await supabaseAdmin
       .from("vacation_requests")
       .select("id, resident_id, start_date, end_date")
       .in("resident_id", residentIds)
+      .lte("start_date", yearEnd)
+      .gte("end_date", yearStart)
       .order("start_date", { ascending: true });
     if (vacErr) {
       return NextResponse.json({ error: vacErr.message }, { status: 500 });
@@ -77,15 +86,42 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const supabase = createSupabaseServerClient(request);
   const programIdFromQuery = getProgramIdFromRequest(request.nextUrl.searchParams);
+  const academicYearIdFromQuery = getAcademicYearIdFromRequest(request.nextUrl.searchParams);
   let ctx;
   try {
-    ctx = await getProgramContextForRequest(supabase, supabaseAdmin, programIdFromQuery);
+    ctx = await getProgramContextForRequest(
+      supabase,
+      supabaseAdmin,
+      programIdFromQuery,
+      academicYearIdFromQuery
+    );
   } catch (e) {
     const res = directorAuthErrorResponse(e);
     if (res) return NextResponse.json({ error: res.error }, { status: res.status });
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { programId } = ctx;
+  const { programId, academicYearId } = ctx;
+  if (!academicYearId) {
+    return NextResponse.json(
+      { error: "Academic year context required for vacation requests" },
+      { status: 400 }
+    );
+  }
+
+  const { data: yearRow } = await supabaseAdmin
+    .from("academic_years")
+    .select("start_date, end_date")
+    .eq("id", academicYearId)
+    .eq("program_id", programId)
+    .maybeSingle();
+  const yearStart = (yearRow as { start_date?: string } | null)?.start_date ?? "";
+  const yearEnd = (yearRow as { end_date?: string } | null)?.end_date ?? "";
+  if (!yearStart || !yearEnd) {
+    return NextResponse.json(
+      { error: "Academic year not found" },
+      { status: 404 }
+    );
+  }
 
   let body: { resident_id?: string; start_date?: string; end_date?: string };
   try {
@@ -104,6 +140,14 @@ export async function POST(request: NextRequest) {
   const end = end_date.slice(0, 10);
   if (start > end) {
     return NextResponse.json({ error: "start_date must be <= end_date" }, { status: 400 });
+  }
+  if (start < yearStart || end > yearEnd) {
+    return NextResponse.json(
+      {
+        error: `Vacation dates must be within the academic year (${yearStart} – ${yearEnd}).`,
+      },
+      { status: 400 }
+    );
   }
   const startMs = new Date(start).getTime();
   const endMs = new Date(end).getTime();

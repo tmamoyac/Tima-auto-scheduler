@@ -2,7 +2,9 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/apiFetch";
 import { safeParseJson } from "@/lib/fetchJson";
+import { formatAcademicYearCompact } from "@/lib/dateUtils";
 import { TimaLogo } from "@/app/components/TimaLogo";
+import Link from "next/link";
 
 type Program = { id: string; name: string };
 
@@ -12,12 +14,18 @@ export function ResidencyAdminHeader({
   isSuperAdmin,
   showSuperAdminLink = false,
   programName,
+  academicYearId,
+  academicYearStart,
+  academicYearEnd,
 }: {
   programId: string;
   currentTab: string;
   isSuperAdmin: boolean;
   showSuperAdminLink?: boolean;
   programName?: string;
+  academicYearId?: string;
+  academicYearStart?: string;
+  academicYearEnd?: string;
 }) {
   const [programs, setPrograms] = useState<Program[]>([]);
   const [loading, setLoading] = useState(isSuperAdmin);
@@ -67,11 +75,16 @@ export function ResidencyAdminHeader({
   const displayPrograms = isSuperAdmin ? programs : directorPrograms;
   const displayLoading = isSuperAdmin && loading;
 
+  const academicYearDisplay =
+    academicYearStart && academicYearEnd
+      ? formatAcademicYearCompact(academicYearStart, academicYearEnd)
+      : "No academic year set";
+
   return (
     <header className="bg-white border-b border-gray-200">
       <div className="max-w-7xl mx-auto px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div className="flex flex-col gap-1">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 shrink-0">
             <div className="flex items-center gap-2">
               <TimaLogo className="w-6 h-6 text-indigo-600 shrink-0" />
               <h1 className="text-lg font-semibold text-gray-900">Tima</h1>
@@ -118,6 +131,22 @@ export function ResidencyAdminHeader({
             ) : (
               <p className="text-sm text-gray-600">{currentProgramName}</p>
             )}
+          </div>
+          <div
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-200 shrink-0"
+            role="region"
+            aria-label="Academic year"
+            data-academic-year-banner
+          >
+            <span className="text-sm font-medium text-indigo-900">
+              Academic year: {academicYearDisplay}
+            </span>
+            <Link
+              href={`/admin/scheduler?tab=setup${isSuperAdmin && programId ? `&programId=${programId}` : ""}${academicYearId ? `&academicYearId=${academicYearId}` : ""}#section-academic-years`}
+              className="inline-flex items-center px-3 py-1 text-sm font-semibold rounded-md bg-indigo-600 text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1"
+            >
+              Set academic yr
+            </Link>
           </div>
           <div className="flex items-center gap-3">
             <button

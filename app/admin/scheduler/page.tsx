@@ -11,27 +11,56 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type ContextResult =
-  | { programId: string; academicYearId: string; programName?: string; useAdminClient: boolean; isSuperAdmin: boolean }
+  | {
+      programId: string;
+      academicYearId: string;
+      programName?: string;
+      academicYearStart: string;
+      academicYearEnd: string;
+      academicYearLabel: string;
+      useAdminClient: boolean;
+      isSuperAdmin: boolean;
+    }
   | { error: "DEACTIVATED" }
   | null;
 
 async function getContext(
-  programIdOverride?: string | null
+  programIdOverride?: string | null,
+  academicYearIdOverride?: string | null
 ): Promise<ContextResult> {
   const supabase = createSupabaseServerClient();
   try {
-    const ctx = await getSchedulerContext(supabase, supabaseAdmin, programIdOverride);
+    const ctx = await getSchedulerContext(
+      supabase,
+      supabaseAdmin,
+      programIdOverride,
+      academicYearIdOverride
+    );
     if (!ctx.academicYearId) return null;
-    const { data: program } = await supabaseAdmin
-      .from("programs")
-      .select("name")
-      .eq("id", ctx.programId)
-      .maybeSingle();
-    const programName = (program as { name?: string } | null)?.name;
+    const [programRes, yearRes] = await Promise.all([
+      supabaseAdmin
+        .from("programs")
+        .select("name")
+        .eq("id", ctx.programId)
+        .maybeSingle(),
+      supabaseAdmin
+        .from("academic_years")
+        .select("start_date, end_date, label")
+        .eq("id", ctx.academicYearId)
+        .maybeSingle(),
+    ]);
+    const programName = (programRes.data as { name?: string } | null)?.name;
+    const year = yearRes.data as { start_date?: string; end_date?: string; label?: string } | null;
+    const academicYearStart = year?.start_date ?? "";
+    const academicYearEnd = year?.end_date ?? "";
+    const academicYearLabel = year?.label ?? "";
     return {
       programId: ctx.programId,
       academicYearId: ctx.academicYearId,
       programName,
+      academicYearStart,
+      academicYearEnd,
+      academicYearLabel,
       useAdminClient: ctx.useAdminClient,
       isSuperAdmin: ctx.isSuperAdmin,
     };
@@ -153,13 +182,23 @@ function getVacationLabelsInMonth(
 export default async function SchedulerPage({
   searchParams,
 }: {
-  searchParams: Promise<{ versionId?: string; tab?: string; programId?: string; programid?: string }>;
+  searchParams: Promise<{
+    versionId?: string;
+    tab?: string;
+    programId?: string;
+    programid?: string;
+    academicYearId?: string;
+    academicyearid?: string;
+  }>;
 }) {
   const params = await searchParams;
   const programIdRaw = params.programId ?? params.programid;
   const programIdOverride =
     typeof programIdRaw === "string" && programIdRaw.length > 0 ? programIdRaw : undefined;
-  const context = await getContext(programIdOverride);
+  const academicYearIdRaw = params.academicYearId ?? params.academicyearid;
+  const academicYearIdOverride =
+    typeof academicYearIdRaw === "string" && academicYearIdRaw.length > 0 ? academicYearIdRaw : undefined;
+  const context = await getContext(programIdOverride, academicYearIdOverride);
 
   const supabase = createSupabaseServerClient();
   const db = context && !("error" in context) && context.useAdminClient ? supabaseAdmin : supabase;
@@ -186,7 +225,7 @@ export default async function SchedulerPage({
     );
   }
 
-  const { programId, academicYearId, programName, isSuperAdmin } = context;
+  const { programId, academicYearId, programName, academicYearStart, academicYearEnd, academicYearLabel, isSuperAdmin } = context;
   const versionIdParam = typeof params.versionId === "string" ? params.versionId : undefined;
   const tabParam = params.tab === "setup" || params.tab === "schedule" ? params.tab : "schedule";
 
@@ -197,6 +236,9 @@ export default async function SchedulerPage({
         programId={programId}
         academicYearId={academicYearId}
         programName={programName}
+        academicYearStart={academicYearStart}
+        academicYearEnd={academicYearEnd}
+        academicYearLabel={academicYearLabel}
         initialTab="setup"
         isSuperAdmin={isSuperAdmin}
       >
@@ -244,6 +286,9 @@ export default async function SchedulerPage({
       programId={programId}
       academicYearId={academicYearId}
       programName={programName}
+      academicYearStart={academicYearStart}
+      academicYearEnd={academicYearEnd}
+      academicYearLabel={academicYearLabel}
       initialTab={tabParam}
       isSuperAdmin={isSuperAdmin}
     >

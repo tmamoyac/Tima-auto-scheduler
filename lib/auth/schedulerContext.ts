@@ -14,11 +14,13 @@ export type SchedulerContextResult = {
  * Gets scheduler context for the scheduler page.
  * - If user is Super Admin AND programIdOverride is provided and valid: use supabaseAdmin, return that program's context.
  * - Else: use requireDirectorContext (profile's program_id).
+ * - academicYearIdOverride: when provided, use it if it belongs to the program; otherwise fall back to default.
  */
 export async function getSchedulerContext(
   supabase: SupabaseClient,
   supabaseAdmin: SupabaseClient,
-  programIdOverride?: string | null
+  programIdOverride?: string | null,
+  academicYearIdOverride?: string | null
 ): Promise<SchedulerContextResult> {
   const {
     data: { user },
@@ -34,7 +36,8 @@ export async function getSchedulerContext(
   if (sa && programIdOverride) {
     const { programId, academicYearId } = await resolveProgramWithAdmin(
       supabaseAdmin,
-      programIdOverride
+      programIdOverride,
+      academicYearIdOverride
     );
     return {
       programId,
@@ -61,7 +64,8 @@ export async function getSchedulerContext(
         if (firstProgram) {
           const { programId, academicYearId } = await resolveProgramWithAdmin(
             supabaseAdmin,
-            firstProgram.id
+            firstProgram.id,
+            academicYearIdOverride
           );
           return {
             programId,
@@ -77,13 +81,36 @@ export async function getSchedulerContext(
   }
 
   const ctx = await requireDirectorContext(supabase);
+  let academicYearId = ctx.academicYearId;
+  if (academicYearIdOverride) {
+    const valid = await validateAcademicYearBelongsToProgram(
+      supabaseAdmin,
+      academicYearIdOverride,
+      ctx.programId
+    );
+    if (valid) academicYearId = academicYearIdOverride;
+  }
   return {
     programId: ctx.programId,
-    academicYearId: ctx.academicYearId,
+    academicYearId,
     userId: ctx.userId,
     useAdminClient: false,
     isSuperAdmin: sa,
   };
+}
+
+async function validateAcademicYearBelongsToProgram(
+  supabaseAdmin: SupabaseClient,
+  academicYearId: string,
+  programId: string
+): Promise<boolean> {
+  const { data } = await supabaseAdmin
+    .from("academic_years")
+    .select("id")
+    .eq("id", academicYearId)
+    .eq("program_id", programId)
+    .maybeSingle();
+  return !!data?.id;
 }
 
 async function getFirstProgram(
@@ -110,7 +137,8 @@ async function checkSuperAdminRole(supabase: SupabaseClient, userId: string): Pr
 
 async function resolveProgramWithAdmin(
   supabaseAdmin: SupabaseClient,
-  programId: string
+  programId: string,
+  academicYearIdOverride?: string | null
 ): Promise<{ programId: string; academicYearId: string | null }> {
   const { data: program, error: progErr } = await supabaseAdmin
     .from("programs")
@@ -120,6 +148,17 @@ async function resolveProgramWithAdmin(
 
   if (progErr || !program?.id) {
     throw new Error("NO_PROFILE");
+  }
+
+  if (academicYearIdOverride) {
+    const valid = await validateAcademicYearBelongsToProgram(
+      supabaseAdmin,
+      academicYearIdOverride,
+      programId
+    );
+    if (valid) {
+      return { programId, academicYearId: academicYearIdOverride };
+    }
   }
 
   const today = new Date().toISOString().slice(0, 10);
@@ -169,14 +208,27 @@ export function getProgramIdFromRequest(
 }
 
 /**
+ * Extracts academicYearId from request search params (case-insensitive).
+ */
+export function getAcademicYearIdFromRequest(
+  searchParams: URLSearchParams
+): string | null {
+  const v =
+    searchParams.get("academicYearId") ?? searchParams.get("academicyearid");
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+/**
  * Gets program context for API routes.
  * - If user is Super Admin AND programIdFromQuery is provided and valid: use supabaseAdmin.
  * - Else: use requireDirectorContext, return anon supabase client.
+ * - academicYearIdOverride: when provided, validate it belongs to the program and use it.
  */
 export async function getProgramContextForRequest(
   supabase: SupabaseClient,
   supabaseAdmin: SupabaseClient,
-  programIdFromQuery?: string | null
+  programIdFromQuery?: string | null,
+  academicYearIdOverride?: string | null
 ): Promise<ProgramContextForRequest> {
   const {
     data: { user },
@@ -192,7 +244,8 @@ export async function getProgramContextForRequest(
   if (sa && programIdFromQuery) {
     const { programId, academicYearId } = await resolveProgramWithAdmin(
       supabaseAdmin,
-      programIdFromQuery
+      programIdFromQuery,
+      academicYearIdOverride
     );
     return {
       programId,
@@ -203,9 +256,18 @@ export async function getProgramContextForRequest(
   }
 
   const ctx = await requireDirectorContext(supabase);
+  let academicYearId = ctx.academicYearId;
+  if (academicYearIdOverride) {
+    const valid = await validateAcademicYearBelongsToProgram(
+      supabaseAdmin,
+      academicYearIdOverride,
+      ctx.programId
+    );
+    if (valid) academicYearId = academicYearIdOverride;
+  }
   return {
     programId: ctx.programId,
-    academicYearId: ctx.academicYearId,
+    academicYearId,
     supabase,
     userId: ctx.userId,
   };

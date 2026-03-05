@@ -10,6 +10,9 @@ export function SchedulerTabsLayout({
   programId,
   academicYearId,
   programName,
+  academicYearStart,
+  academicYearEnd,
+  academicYearLabel,
   initialTab = "schedule",
   isSuperAdmin = false,
   children,
@@ -17,16 +20,22 @@ export function SchedulerTabsLayout({
   programId: string;
   academicYearId: string;
   programName?: string;
+  academicYearStart: string;
+  academicYearEnd: string;
+  academicYearLabel: string;
   initialTab?: TabId;
   isSuperAdmin?: boolean;
   children: React.ReactNode;
 }) {
   const activeTab = initialTab;
 
-  const tabHref = (tabId: TabId) =>
-    isSuperAdmin
-      ? `/admin/scheduler?tab=${tabId}&programId=${encodeURIComponent(programId)}`
-      : `/admin/scheduler?tab=${tabId}`;
+  const tabHref = (tabId: TabId) => {
+    const search = new URLSearchParams();
+    search.set("tab", tabId);
+    if (isSuperAdmin) search.set("programId", programId);
+    search.set("academicYearId", academicYearId);
+    return `/admin/scheduler?${search.toString()}`;
+  };
 
   const tabs: { id: TabId; label: string }[] = useMemo(
     () => [
@@ -42,6 +51,9 @@ export function SchedulerTabsLayout({
         programId={programId}
         currentTab={activeTab}
         programName={programName}
+        academicYearId={academicYearId}
+        academicYearStart={academicYearStart}
+        academicYearEnd={academicYearEnd}
         isSuperAdmin={isSuperAdmin}
         showSuperAdminLink={isSuperAdmin}
       />
@@ -63,7 +75,16 @@ export function SchedulerTabsLayout({
             ))}
           </div>
         </div>
-        {activeTab === "setup" && <ResidencyAdminPage programId={programId} academicYearId={academicYearId} />}
+        {activeTab === "setup" && (
+          <ResidencyAdminPage
+            programId={programId}
+            academicYearId={academicYearId}
+            academicYearStart={academicYearStart}
+            academicYearEnd={academicYearEnd}
+            academicYearLabel={academicYearLabel}
+            isSuperAdmin={isSuperAdmin}
+          />
+        )}
         {activeTab === "schedule" && (
           <div className="max-w-7xl w-full mx-auto px-6 py-6 min-w-0">{children}</div>
         )}
