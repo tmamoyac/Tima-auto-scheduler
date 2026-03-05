@@ -17,7 +17,6 @@ type ContextResult =
       programName?: string;
       academicYearStart: string;
       academicYearEnd: string;
-      academicYearLabel: string;
       useAdminClient: boolean;
       isSuperAdmin: boolean;
     }
@@ -45,7 +44,7 @@ async function getContext(
         .maybeSingle(),
       supabaseAdmin
         .from("academic_years")
-        .select("start_date, end_date, label")
+        .select("start_date, end_date")
         .eq("id", ctx.academicYearId)
         .maybeSingle(),
     ]);
@@ -53,14 +52,12 @@ async function getContext(
     const year = yearRes.data as { start_date?: string; end_date?: string; label?: string } | null;
     const academicYearStart = year?.start_date ?? "";
     const academicYearEnd = year?.end_date ?? "";
-    const academicYearLabel = year?.label ?? "";
     return {
       programId: ctx.programId,
       academicYearId: ctx.academicYearId,
       programName,
       academicYearStart,
       academicYearEnd,
-      academicYearLabel,
       useAdminClient: ctx.useAdminClient,
       isSuperAdmin: ctx.isSuperAdmin,
     };
@@ -225,7 +222,7 @@ export default async function SchedulerPage({
     );
   }
 
-  const { programId, academicYearId, programName, academicYearStart, academicYearEnd, academicYearLabel, isSuperAdmin } = context;
+  const { programId, academicYearId, programName, academicYearStart, academicYearEnd, isSuperAdmin } = context;
   const versionIdParam = typeof params.versionId === "string" ? params.versionId : undefined;
   const tabParam = params.tab === "setup" || params.tab === "schedule" ? params.tab : "schedule";
 
@@ -238,7 +235,6 @@ export default async function SchedulerPage({
         programName={programName}
         academicYearStart={academicYearStart}
         academicYearEnd={academicYearEnd}
-        academicYearLabel={academicYearLabel}
         initialTab="setup"
         isSuperAdmin={isSuperAdmin}
       >
@@ -286,10 +282,9 @@ export default async function SchedulerPage({
       programId={programId}
       academicYearId={academicYearId}
       programName={programName}
-      academicYearStart={academicYearStart}
-      academicYearEnd={academicYearEnd}
-      academicYearLabel={academicYearLabel}
-      initialTab={tabParam}
+        academicYearStart={academicYearStart}
+        academicYearEnd={academicYearEnd}
+        initialTab={tabParam}
       isSuperAdmin={isSuperAdmin}
     >
       <h1 className="text-2xl font-semibold mb-4">Scheduler</h1>

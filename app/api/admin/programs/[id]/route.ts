@@ -26,14 +26,21 @@ export async function GET(
 
   const { data, error } = await db
     .from("programs")
-    .select("id, name, avoid_back_to_back_consult, no_consult_when_vacation_in_month")
+    .select("*")
     .eq("id", id)
     .single();
   if (error) {
     return NextResponse.json({ error: error.message }, { status: error.code === "PGRST116" ? 404 : 500 });
   }
   if (!data) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json(data);
+  const row = data as Record<string, unknown>;
+  return NextResponse.json({
+    id: row.id,
+    name: row.name,
+    avoid_back_to_back_consult: row.avoid_back_to_back_consult === true,
+    no_consult_when_vacation_in_month: row.no_consult_when_vacation_in_month === true,
+    avoid_back_to_back_transplant: row.avoid_back_to_back_transplant === true,
+  });
 }
 
 export async function PATCH(
@@ -56,7 +63,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: { avoid_back_to_back_consult?: boolean; no_consult_when_vacation_in_month?: boolean };
+  let body: { avoid_back_to_back_consult?: boolean; no_consult_when_vacation_in_month?: boolean; avoid_back_to_back_transplant?: boolean };
   try {
     body = await request.json();
   } catch {
@@ -67,6 +74,8 @@ export async function PATCH(
     updates.avoid_back_to_back_consult = Boolean(body.avoid_back_to_back_consult);
   if (body.no_consult_when_vacation_in_month !== undefined)
     updates.no_consult_when_vacation_in_month = Boolean(body.no_consult_when_vacation_in_month);
+  if (body.avoid_back_to_back_transplant !== undefined)
+    updates.avoid_back_to_back_transplant = Boolean(body.avoid_back_to_back_transplant);
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });
   }

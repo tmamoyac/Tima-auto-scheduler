@@ -12,7 +12,6 @@ export function SchedulerTabsLayout({
   programName,
   academicYearStart,
   academicYearEnd,
-  academicYearLabel,
   initialTab = "schedule",
   isSuperAdmin = false,
   children,
@@ -22,7 +21,6 @@ export function SchedulerTabsLayout({
   programName?: string;
   academicYearStart: string;
   academicYearEnd: string;
-  academicYearLabel: string;
   initialTab?: TabId;
   isSuperAdmin?: boolean;
   children: React.ReactNode;
@@ -47,13 +45,10 @@ export function SchedulerTabsLayout({
 
   return (
     <div className="flex flex-col h-full bg-[#F7F9FC]">
-      <ResidencyAdminHeader
+          <ResidencyAdminHeader
         programId={programId}
         currentTab={activeTab}
         programName={programName}
-        academicYearId={academicYearId}
-        academicYearStart={academicYearStart}
-        academicYearEnd={academicYearEnd}
         isSuperAdmin={isSuperAdmin}
         showSuperAdminLink={isSuperAdmin}
       />
@@ -81,8 +76,6 @@ export function SchedulerTabsLayout({
             academicYearId={academicYearId}
             academicYearStart={academicYearStart}
             academicYearEnd={academicYearEnd}
-            academicYearLabel={academicYearLabel}
-            isSuperAdmin={isSuperAdmin}
           />
         )}
         {activeTab === "schedule" && (

@@ -12,6 +12,7 @@ type Rotation = {
   eligible_pgy_min: number;
   eligible_pgy_max: number;
   is_consult?: boolean;
+  is_transplant?: boolean;
 };
 
 export function RotationsSection({
@@ -32,6 +33,7 @@ export function RotationsSection({
     eligible_pgy_min: 1,
     eligible_pgy_max: 3,
     is_consult: false,
+    is_transplant: false,
   });
   const [saving, setSaving] = useState(false);
 
@@ -70,7 +72,7 @@ export function RotationsSection({
   const openAdd = () => {
     setEditing(null);
     setAdding(true);
-    setForm({ name: "", capacity_per_month: 4, eligible_pgy_min: 1, eligible_pgy_max: 3, is_consult: false });
+    setForm({ name: "", capacity_per_month: 4, eligible_pgy_min: 1, eligible_pgy_max: 3, is_consult: false, is_transplant: false });
   };
 
   const openEdit = (r: Rotation) => {
@@ -82,6 +84,7 @@ export function RotationsSection({
       eligible_pgy_min: r.eligible_pgy_min,
       eligible_pgy_max: r.eligible_pgy_max,
       is_consult: r.is_consult === true,
+      is_transplant: r.is_transplant === true,
     });
   };
 
@@ -107,7 +110,7 @@ export function RotationsSection({
         const res = await apiFetch(`/api/admin/rotations/${editing.id}?programId=${encodeURIComponent(programId)}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(form),
+          body: JSON.stringify({ ...form, program_id: programId }),
           credentials: "include",
         });
         if (!res.ok) throw new Error((await safeParseJson<{ error?: string }>(res)).error || "Failed");
@@ -132,7 +135,7 @@ export function RotationsSection({
   if (variant === "minimal") {
     return (
       <section>
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-2">
           <h2 className="text-lg font-semibold text-gray-900">Rotations</h2>
           <button
             type="button"
@@ -141,6 +144,14 @@ export function RotationsSection({
           >
             + Add Rotation
           </button>
+        </div>
+        <div className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3">
+          <p className="text-sm text-indigo-900">
+            <span className="font-semibold">How it works:</span>{" "}
+            <strong>1/mo</strong> = max residents per month •{" "}
+            <strong>1–3</strong> = eligible PGY levels •{" "}
+            <strong>Consult</strong> / <strong>Transplant</strong> = special types (scheduler can avoid back-to-back months when enabled in rules)
+          </p>
         </div>
         {loading ? (
           <p className="text-sm text-gray-500 py-4">Loading…</p>
@@ -163,13 +174,23 @@ export function RotationsSection({
                   <span className="text-sm text-gray-600 shrink-0">
                     {r.eligible_pgy_min}–{r.eligible_pgy_max}
                   </span>
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-xs font-medium shrink-0 ${
-                      r.is_consult ? "bg-indigo-100 text-indigo-700" : "bg-gray-100 text-gray-700"
-                    }`}
-                  >
-                    {r.is_consult ? "Consult" : "Other"}
-                  </span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {r.is_consult && (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700">
+                        Consult
+                      </span>
+                    )}
+                    {r.is_transplant && (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+                        Transplant
+                      </span>
+                    )}
+                    {!r.is_consult && !r.is_transplant && (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                        Other
+                      </span>
+                    )}
+                  </div>
                   <ActionsMenu
                     items={[
                       { label: "Edit", onClick: () => openEdit(r) },
@@ -228,6 +249,15 @@ export function RotationsSection({
                   />
                   Consult
                 </label>
+                <label className="flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={form.is_transplant}
+                    onChange={(e) => setForm((f) => ({ ...f, is_transplant: e.target.checked }))}
+                    className="rounded"
+                  />
+                  Transplant
+                </label>
                 <button
                   type="button"
                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg disabled:opacity-50"
@@ -248,6 +278,7 @@ export function RotationsSection({
                       eligible_pgy_min: 1,
                       eligible_pgy_max: 3,
                       is_consult: false,
+                      is_transplant: false,
                     });
                   }}
                 >
@@ -277,6 +308,7 @@ export function RotationsSection({
                 <th className="border border-gray-300 bg-gray-100 p-2 text-left">Capacity/month</th>
                 <th className="border border-gray-300 bg-gray-100 p-2 text-left">Eligible PGY</th>
                 <th className="border border-gray-300 bg-gray-100 p-2 text-left">Consult</th>
+                <th className="border border-gray-300 bg-gray-100 p-2 text-left">Transplant</th>
                 <th className="border border-gray-300 bg-gray-100 p-2 text-left">Actions</th>
               </tr>
             </thead>
@@ -289,6 +321,7 @@ export function RotationsSection({
                     {r.eligible_pgy_min}–{r.eligible_pgy_max}
                   </td>
                   <td className="border border-gray-300 p-2">{r.is_consult ? "Yes" : "No"}</td>
+                  <td className="border border-gray-300 p-2">{r.is_transplant ? "Yes" : "No"}</td>
                   <td className="border border-gray-300 p-2">
                     <button
                       type="button"
@@ -360,7 +393,16 @@ export function RotationsSection({
                     onChange={(e) => setForm((f) => ({ ...f, is_consult: e.target.checked }))}
                     className="rounded"
                   />
-                  Counts as consult (for back-to-back rule)
+                  Consult
+                </label>
+                <label className="flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={form.is_transplant}
+                    onChange={(e) => setForm((f) => ({ ...f, is_transplant: e.target.checked }))}
+                    className="rounded"
+                  />
+                  Transplant
                 </label>
                 <button
                   type="button"
@@ -376,7 +418,7 @@ export function RotationsSection({
                   onClick={() => {
                     setEditing(null);
                     setAdding(false);
-                    setForm({ name: "", capacity_per_month: 4, eligible_pgy_min: 1, eligible_pgy_max: 3, is_consult: false });
+                    setForm({ name: "", capacity_per_month: 4, eligible_pgy_min: 1, eligible_pgy_max: 3, is_consult: false, is_transplant: false });
                   }}
                 >
                   Cancel

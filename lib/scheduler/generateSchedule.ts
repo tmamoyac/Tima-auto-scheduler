@@ -15,6 +15,7 @@ type Rotation = {
   eligible_pgy_min: number;
   eligible_pgy_max: number;
   is_consult?: boolean;
+  is_transplant?: boolean;
 };
 type Requirement = { pgy: number; rotation_id: string; min_months_required: number };
 type VacationRange = { resident_id: string; start_date: string; end_date: string };
@@ -81,7 +82,7 @@ export async function generateSchedule({
 
   const { data: rotations, error: rotationsErr } = await supabaseAdmin
     .from("rotations")
-    .select("id, program_id, capacity_per_month, eligible_pgy_min, eligible_pgy_max, is_consult")
+    .select("id, program_id, capacity_per_month, eligible_pgy_min, eligible_pgy_max, is_consult, is_transplant")
     .eq("program_id", programId);
 
   if (rotationsErr) throw rotationsErr;
@@ -89,16 +90,19 @@ export async function generateSchedule({
 
   const { data: programRow } = await supabaseAdmin
     .from("programs")
-    .select("avoid_back_to_back_consult, no_consult_when_vacation_in_month")
+    .select("avoid_back_to_back_consult, no_consult_when_vacation_in_month, avoid_back_to_back_transplant")
     .eq("id", programId)
     .single();
-  const program = programRow as { avoid_back_to_back_consult?: boolean; no_consult_when_vacation_in_month?: boolean } | null;
+  const program = programRow as { avoid_back_to_back_consult?: boolean; no_consult_when_vacation_in_month?: boolean; avoid_back_to_back_transplant?: boolean } | null;
   const avoidBackToBackConsult = program?.avoid_back_to_back_consult === true;
   const noConsultWhenVacationInMonth = program?.no_consult_when_vacation_in_month === true;
+  const avoidBackToBackTransplant = program?.avoid_back_to_back_transplant === true;
 
   const consultRotationIds = new Set<string>();
+  const transplantRotationIds = new Set<string>();
   for (const rot of rotationsList) {
     if ((rot as Rotation & { is_consult?: boolean }).is_consult) consultRotationIds.add(rot.id);
+    if ((rot as Rotation & { is_transplant?: boolean }).is_transplant) transplantRotationIds.add(rot.id);
   }
 
   const { data: yearRow } = await supabaseAdmin
@@ -202,13 +206,20 @@ export async function generateSchedule({
       }
     }
 
-    // When avoiding back-to-back consult, process residents who had consult last month first
-    // so they get first pick of non-consult slots and are less likely to get consult again.
+    // When avoiding back-to-back consult/transplant, process residents who had it last month first
+    // so they get first pick of non-consult/non-transplant slots.
+    const avoidIds = new Set<string>();
+    if (avoidBackToBackConsult && consultRotationIds.size > 0) {
+      for (const id of consultRotationIds) avoidIds.add(id);
+    }
+    if (avoidBackToBackTransplant && transplantRotationIds.size > 0) {
+      for (const id of transplantRotationIds) avoidIds.add(id);
+    }
     const orderedResidents =
-      avoidBackToBackConsult && consultRotationIds.size > 0
+      avoidIds.size > 0
         ? [...shuffledResidents].sort((a, b) => {
-            const aHad = consultRotationIds.has(prevMonthAssignments.get(a.id) ?? "");
-            const bHad = consultRotationIds.has(prevMonthAssignments.get(b.id) ?? "");
+            const aHad = avoidIds.has(prevMonthAssignments.get(a.id) ?? "");
+            const bHad = avoidIds.has(prevMonthAssignments.get(b.id) ?? "");
             if (aHad && !bHad) return -1;
             if (!aHad && bHad) return 1;
             return 0;
@@ -258,10 +269,20 @@ export async function generateSchedule({
             const prevRotId = prevMonthAssignments.get(resident.id);
             return prevRotId != null && consultRotationIds.has(prevRotId);
           })();
+        const hadTransplantLastMonth =
+          avoidBackToBackTransplant &&
+          (() => {
+            const prevRotId = prevMonthAssignments.get(resident.id);
+            return prevRotId != null && transplantRotationIds.has(prevRotId);
+          })();
         let candidatePool = eligible;
         if (hadConsultLastMonth && eligible.length > 0) {
           const eligibleNonConsult = eligible.filter((rot) => !consultRotationIds.has(rot.id));
           if (eligibleNonConsult.length > 0) candidatePool = eligibleNonConsult;
+        }
+        if (hadTransplantLastMonth && candidatePool.length > 0) {
+          const eligibleNonTransplant = candidatePool.filter((rot) => !transplantRotationIds.has(rot.id));
+          if (eligibleNonTransplant.length > 0) candidatePool = eligibleNonTransplant;
         }
         const requiredWithCapacity = candidatePool.filter((rot) => {
           const rem = required.get(reqKey(resident.id, rot.id)) ?? 0;
