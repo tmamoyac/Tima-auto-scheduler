@@ -135,13 +135,8 @@ export function RotationsSection({
   if (variant === "minimal") {
     return (
       <section>
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-            <h2 className="text-lg font-semibold text-gray-900">Rotations</h2>
-            <p className="text-sm text-gray-500">
-              1/mo = max residents per month • 1-5 = eligible PGY levels • Consult / Transplant = special types (scheduler can avoid back-to-back months when enabled in rules).
-            </p>
-          </div>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-2">
+          <h2 className="text-lg font-semibold text-gray-900">Rotations</h2>
           <button
             type="button"
             className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg self-start sm:self-auto"
@@ -149,6 +144,14 @@ export function RotationsSection({
           >
             + Add Rotation
           </button>
+        </div>
+        <div className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3">
+          <p className="text-sm text-indigo-900">
+            <span className="font-semibold">How it works:</span>{" "}
+            <strong>1/mo</strong> = max residents per month •{" "}
+            <strong>1-5</strong> = eligible PGY levels •{" "}
+            <strong>Consult</strong> / <strong>Transplant</strong> = special types (scheduler can avoid back-to-back months when enabled in rules)
+          </p>
         </div>
         {loading ? (
           <p className="text-sm text-gray-500 py-4">Loading…</p>
