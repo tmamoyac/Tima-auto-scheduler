@@ -111,7 +111,7 @@ export async function PATCH(
     const { data: otherYears } = await supabaseAdmin
       .from("academic_years")
       .select("id, start_date, end_date")
-      .eq("program_id", programId)
+      .eq("program_id", (existingYear as { program_id: string }).program_id)
       .neq("id", id);
     for (const y of otherYears ?? []) {
       const es = (y as { start_date: string }).start_date;
