@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import { ResidencyAdminHeader } from "./ResidencyAdminHeader";
 import { ResidencyAdminPage } from "./ResidencyAdminPage";
 
@@ -25,12 +26,17 @@ export function SchedulerTabsLayout({
   isSuperAdmin?: boolean;
   children: React.ReactNode;
 }) {
+  const searchParams = useSearchParams();
+  const programIdFromUrl = searchParams.get("programId") ?? searchParams.get("programid");
+  const effectiveProgramId =
+    typeof programIdFromUrl === "string" && programIdFromUrl.length > 0 ? programIdFromUrl : programId;
+
   const activeTab = initialTab;
 
   const tabHref = (tabId: TabId) => {
     const search = new URLSearchParams();
     search.set("tab", tabId);
-    if (isSuperAdmin) search.set("programId", programId);
+    if (isSuperAdmin) search.set("programId", effectiveProgramId);
     search.set("academicYearId", academicYearId);
     return `/admin/scheduler?${search.toString()}`;
   };
@@ -46,7 +52,7 @@ export function SchedulerTabsLayout({
   return (
     <div className="flex flex-col h-full bg-[#F7F9FC]">
           <ResidencyAdminHeader
-        programId={programId}
+        programId={effectiveProgramId}
         currentTab={activeTab}
         programName={programName}
         isSuperAdmin={isSuperAdmin}
@@ -72,7 +78,8 @@ export function SchedulerTabsLayout({
         </div>
         {activeTab === "setup" && (
           <ResidencyAdminPage
-            programId={programId}
+            key={effectiveProgramId}
+            programId={effectiveProgramId}
             academicYearId={academicYearId}
             academicYearStart={academicYearStart}
             academicYearEnd={academicYearEnd}
