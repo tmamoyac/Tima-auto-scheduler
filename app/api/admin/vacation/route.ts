@@ -33,8 +33,6 @@ export async function GET(request: NextRequest) {
       { status: 404 }
     );
   }
-  const yearStart = yearRow.start_date as string;
-  const yearEnd = yearRow.end_date as string;
 
   const { data: months, error: monthsErr } = await supabaseAdmin
     .from("months")
@@ -56,16 +54,17 @@ export async function GET(request: NextRequest) {
   }
 
   const residentIds = (residents ?? []).map((r) => r.id);
-  const vacationQuery = supabaseAdmin
-    .from("vacation_requests")
-    .select("id, resident_id, start_date, end_date")
-    .lte("start_date", yearEnd)
-    .gte("end_date", yearStart);
-  const { data: vacationRows, error: vacErr } = residentIds.length > 0
-    ? await vacationQuery.in("resident_id", residentIds)
-    : await vacationQuery.in("resident_id", ["00000000-0000-0000-0000-000000000000"]);
-  if (vacErr) {
-    return NextResponse.json({ error: vacErr.message }, { status: 500 });
+  let vacationRows: { id: string; resident_id: string; start_date: string; end_date: string }[] = [];
+  if (residentIds.length > 0) {
+    const { data, error: vacErr } = await supabaseAdmin
+      .from("vacation_requests")
+      .select("id, resident_id, start_date, end_date")
+      .in("resident_id", residentIds)
+      .order("start_date", { ascending: true });
+    if (vacErr) {
+      return NextResponse.json({ error: vacErr.message }, { status: 500 });
+    }
+    vacationRows = data ?? [];
   }
 
   return NextResponse.json({
