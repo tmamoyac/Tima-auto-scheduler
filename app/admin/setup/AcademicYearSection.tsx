@@ -200,30 +200,28 @@ export function AcademicYearSection({
         <ul className="space-y-2">
           {years.map((y) => (
             <li key={y.id} className="flex items-center justify-between gap-3 py-2 border-b border-gray-100 last:border-0">
-              <span className="text-sm text-gray-700">
+              <span className="text-sm text-gray-700 flex items-center gap-2 flex-wrap">
                 {formatYearRange(y.start_date, y.end_date)}
                 {y.id === currentYearId && (
-                  <span className="ml-2 text-indigo-600 font-medium">(current)</span>
+                  <span className="text-indigo-600 font-medium">(current)</span>
                 )}
-              </span>
-              <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => openEditModal(y)}
-                  className="text-sm text-gray-600 hover:text-gray-900 font-medium"
+                  className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
                 >
                   Edit
                 </button>
-                {y.id !== currentYearId && (
-                  <button
-                    type="button"
-                    onClick={() => switchToYear(y.id)}
-                    className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
-                  >
-                    Use this year
-                  </button>
-                )}
-              </div>
+              </span>
+              {y.id !== currentYearId && (
+                <button
+                  type="button"
+                  onClick={() => switchToYear(y.id)}
+                  className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+                >
+                  Use this year
+                </button>
+              )}
             </li>
           ))}
         </ul>
