@@ -31,9 +31,17 @@ export async function getSchedulerContext(
     throw new Error("UNAUTHENTICATED");
   }
 
-  const sa = isSuperAdmin(user.email ?? undefined) || await checkSuperAdminRole(supabase, user.id);
+  const sa =
+    isSuperAdmin(user.email ?? undefined) ||
+    (await checkSuperAdminRole(supabase, user.id));
 
-  if (sa && programIdOverride) {
+  // When URL has programId, also check role with admin client so RLS/env doesn't block super admin
+  const saWithAdmin =
+    sa ||
+    (programIdOverride != null &&
+      (await checkSuperAdminRoleWithAdmin(supabaseAdmin, user.id)));
+
+  if (saWithAdmin && programIdOverride) {
     const { programId, academicYearId } = await resolveProgramWithAdmin(
       supabaseAdmin,
       programIdOverride,
@@ -128,6 +136,19 @@ async function getFirstProgram(
 
 async function checkSuperAdminRole(supabase: SupabaseClient, userId: string): Promise<boolean> {
   const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", userId)
+    .maybeSingle();
+  return (profile as { role?: string } | null)?.role === "super_admin";
+}
+
+/** Check super_admin using admin client (bypasses RLS). Use when URL has programId so we honor it. */
+async function checkSuperAdminRoleWithAdmin(
+  supabaseAdmin: SupabaseClient,
+  userId: string
+): Promise<boolean> {
+  const { data: profile } = await supabaseAdmin
     .from("profiles")
     .select("role")
     .eq("id", userId)
@@ -239,9 +260,16 @@ export async function getProgramContextForRequest(
     throw new Error("UNAUTHENTICATED");
   }
 
-  const sa = isSuperAdmin(user.email ?? undefined) || await checkSuperAdminRole(supabase, user.id);
+  const sa =
+    isSuperAdmin(user.email ?? undefined) ||
+    (await checkSuperAdminRole(supabase, user.id));
 
-  if (sa && programIdFromQuery) {
+  const saWithAdmin =
+    sa ||
+    (programIdFromQuery != null &&
+      (await checkSuperAdminRoleWithAdmin(supabaseAdmin, user.id)));
+
+  if (saWithAdmin && programIdFromQuery) {
     const { programId, academicYearId } = await resolveProgramWithAdmin(
       supabaseAdmin,
       programIdFromQuery,

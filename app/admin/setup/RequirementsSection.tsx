@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/apiFetch";
 import { safeParseJson } from "@/lib/fetchJson";
 
@@ -14,12 +15,17 @@ type Requirement = {
 type Rotation = { id: string; name: string };
 
 export function RequirementsSection({
-  programId,
+  programId: programIdProp,
   variant = "default",
 }: {
   programId: string;
   variant?: "default" | "minimal";
 }) {
+  const searchParams = useSearchParams();
+  const programIdFromUrl = searchParams.get("programId") ?? searchParams.get("programid");
+  const programId =
+    typeof programIdFromUrl === "string" && programIdFromUrl.length > 0 ? programIdFromUrl : programIdProp;
+
   const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [rotations, setRotations] = useState<Rotation[]>([]);
   const [loading, setLoading] = useState(true);

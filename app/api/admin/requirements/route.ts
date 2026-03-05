@@ -25,8 +25,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
   const rows = (data ?? []) as { id: string; pgy: number; rotation_id: string; min_months_required: number }[];
+  const noStore = { headers: { "Cache-Control": "no-store, max-age=0" } as HeadersInit };
   if (rows.length === 0) {
-    return NextResponse.json([]);
+    return NextResponse.json([], noStore);
   }
   const rotationIds = [...new Set(rows.map((r) => r.rotation_id))];
   const { data: rotations } = await db
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest) {
     ...r,
     rotation_name: nameById[r.rotation_id] ?? "",
   }));
-  return NextResponse.json(result);
+  return NextResponse.json(result, noStore);
 }
 
 export async function POST(request: NextRequest) {

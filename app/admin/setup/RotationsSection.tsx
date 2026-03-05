@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/apiFetch";
 import { safeParseJson } from "@/lib/fetchJson";
 import { ActionsMenu } from "./ActionsMenu";
@@ -16,12 +17,17 @@ type Rotation = {
 };
 
 export function RotationsSection({
-  programId,
+  programId: programIdProp,
   variant = "default",
 }: {
   programId: string;
   variant?: "default" | "minimal";
 }) {
+  const searchParams = useSearchParams();
+  const programIdFromUrl = searchParams.get("programId") ?? searchParams.get("programid");
+  const programId =
+    typeof programIdFromUrl === "string" && programIdFromUrl.length > 0 ? programIdFromUrl : programIdProp;
+
   const [list, setList] = useState<Rotation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

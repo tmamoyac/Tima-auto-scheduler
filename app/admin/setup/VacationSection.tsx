@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/apiFetch";
 import { safeParseJson } from "@/lib/fetchJson";
 import { ActionsMenu } from "./ActionsMenu";
@@ -30,7 +31,7 @@ function formatYearRangeShort(start: string, end: string): string {
 }
 
 export function VacationSection({
-  programId,
+  programId: programIdProp,
   academicYearId,
   academicYearStart,
   academicYearEnd,
@@ -42,6 +43,11 @@ export function VacationSection({
   academicYearEnd: string;
   variant?: "default" | "minimal";
 }) {
+  const searchParams = useSearchParams();
+  const programIdFromUrl = searchParams.get("programId") ?? searchParams.get("programid");
+  const programId =
+    typeof programIdFromUrl === "string" && programIdFromUrl.length > 0 ? programIdFromUrl : programIdProp;
+
   const [residents, setResidents] = useState<Resident[]>([]);
   const [vacationRequests, setVacationRequests] = useState<VacationRequest[]>([]);
   const [loading, setLoading] = useState(true);

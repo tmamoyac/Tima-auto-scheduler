@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/apiFetch";
 import { safeParseJson } from "@/lib/fetchJson";
 import { ActionsMenu } from "./ActionsMenu";
@@ -19,7 +20,7 @@ type Month = { id: string; month_label: string; month_index: number };
 type Rotation = { id: string; name: string };
 
 export function FixedAssignmentsSection({
-  programId,
+  programId: programIdProp,
   academicYearId,
   variant = "default",
 }: {
@@ -27,6 +28,11 @@ export function FixedAssignmentsSection({
   academicYearId: string;
   variant?: "default" | "minimal";
 }) {
+  const searchParams = useSearchParams();
+  const programIdFromUrl = searchParams.get("programId") ?? searchParams.get("programid");
+  const programId =
+    typeof programIdFromUrl === "string" && programIdFromUrl.length > 0 ? programIdFromUrl : programIdProp;
+
   const [rules, setRules] = useState<Rule[]>([]);
   const [residents, setResidents] = useState<Resident[]>([]);
   const [months, setMonths] = useState<Month[]>([]);

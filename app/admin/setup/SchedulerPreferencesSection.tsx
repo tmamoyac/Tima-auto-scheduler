@@ -1,10 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/apiFetch";
 import { safeParseJson } from "@/lib/fetchJson";
 
-export function SchedulerPreferencesSection({ programId }: { programId: string }) {
+export function SchedulerPreferencesSection({ programId: programIdProp }: { programId: string }) {
+  const searchParams = useSearchParams();
+  const programIdFromUrl = searchParams.get("programId") ?? searchParams.get("programid");
+  const programId =
+    typeof programIdFromUrl === "string" && programIdFromUrl.length > 0 ? programIdFromUrl : programIdProp;
   const [avoidBackToBackConsult, setAvoidBackToBackConsult] = useState(false);
   const [noConsultWhenVacationInMonth, setNoConsultWhenVacationInMonth] = useState(false);
   const [avoidBackToBackTransplant, setAvoidBackToBackTransplant] = useState(false);
