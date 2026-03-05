@@ -13,7 +13,19 @@ type User = {
   is_active: boolean;
 };
 
-type Program = { id: string; name: string; is_active?: boolean };
+type Program = {
+  id: string;
+  name: string;
+  is_active?: boolean;
+  default_academic_year?: { id: string; start_date: string; end_date: string } | null;
+};
+
+function formatYearRange(start: string, end: string): string {
+  if (!start || !end) return "";
+  const s = new Date(start + "T12:00:00");
+  const e = new Date(end + "T12:00:00");
+  return `${s.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} – ${e.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+}
 
 export function SuperAdminContent() {
   const [users, setUsers] = useState<User[]>([]);
@@ -44,8 +56,18 @@ export function SuperAdminContent() {
 
   const [showCreateProgram, setShowCreateProgram] = useState(false);
   const [createProgramName, setCreateProgramName] = useState("");
+  const [createProgramStartDate, setCreateProgramStartDate] = useState("");
+  const [createProgramEndDate, setCreateProgramEndDate] = useState("");
   const [createProgramSubmitting, setCreateProgramSubmitting] = useState(false);
   const [createProgramError, setCreateProgramError] = useState<string | null>(null);
+
+  const [editYearOpen, setEditYearOpen] = useState(false);
+  const [editYearProgramId, setEditYearProgramId] = useState("");
+  const [editYearId, setEditYearId] = useState("");
+  const [editYearStart, setEditYearStart] = useState("");
+  const [editYearEnd, setEditYearEnd] = useState("");
+  const [editYearSaving, setEditYearSaving] = useState(false);
+  const [editYearError, setEditYearError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -89,6 +111,14 @@ export function SuperAdminContent() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    if (showCreateProgram) {
+      const y = new Date().getUTCFullYear();
+      setCreateProgramStartDate(`${y}-07-01`);
+      setCreateProgramEndDate(`${y + 1}-06-30`);
+    }
+  }, [showCreateProgram]);
 
   const handleToggleActive = async (user: User) => {
     if (!user.program_id) return;
@@ -213,22 +243,78 @@ export function SuperAdminContent() {
     setCreateProgramSubmitting(true);
     setCreateProgramError(null);
     try {
+      const body: { name: string; start_date?: string; end_date?: string } = {
+        name: createProgramName.trim(),
+      };
+      if (createProgramStartDate && createProgramEndDate) {
+        body.start_date = createProgramStartDate;
+        body.end_date = createProgramEndDate;
+      }
       const res = await apiFetch("/api/super-admin/programs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: createProgramName.trim() }),
+        body: JSON.stringify(body),
         credentials: "include",
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to create program");
       setShowCreateProgram(false);
       setCreateProgramName("");
+      setCreateProgramStartDate("");
+      setCreateProgramEndDate("");
       setActionMsg("Program created.");
       fetchData();
     } catch (e) {
       setCreateProgramError(e instanceof Error ? e.message : "Failed");
     } finally {
       setCreateProgramSubmitting(false);
+    }
+  };
+
+  const openEditAcademicYear = (p: Program) => {
+    const ay = p.default_academic_year;
+    if (!ay) return;
+    setEditYearProgramId(p.id);
+    setEditYearId(ay.id);
+    setEditYearStart(ay.start_date);
+    setEditYearEnd(ay.end_date);
+    setEditYearError(null);
+    setEditYearOpen(true);
+  };
+
+  const closeEditAcademicYear = () => {
+    setEditYearOpen(false);
+    setEditYearProgramId("");
+    setEditYearId("");
+    setEditYearStart("");
+    setEditYearEnd("");
+    setEditYearError(null);
+  };
+
+  const handleSaveEditAcademicYear = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editYearId || !editYearProgramId) return;
+    setEditYearSaving(true);
+    setEditYearError(null);
+    try {
+      const res = await apiFetch(
+        `/api/admin/academic-years/${editYearId}?programId=${encodeURIComponent(editYearProgramId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ start_date: editYearStart, end_date: editYearEnd }),
+          credentials: "include",
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { error?: string }).error || "Failed to update");
+      setActionMsg("Academic year updated.");
+      closeEditAcademicYear();
+      fetchData();
+    } catch (e) {
+      setEditYearError(e instanceof Error ? e.message : "Failed to update");
+    } finally {
+      setEditYearSaving(false);
     }
   };
 
@@ -318,6 +404,27 @@ export function SuperAdminContent() {
                 className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
               />
             </div>
+            <p className="text-xs text-gray-500">Optional: set academic year range (11–13 months). Leave blank to use default Jul 1 – Jun 30.</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Academic year start</label>
+                <input
+                  type="date"
+                  value={createProgramStartDate}
+                  onChange={(e) => setCreateProgramStartDate(e.target.value)}
+                  className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Academic year end</label>
+                <input
+                  type="date"
+                  value={createProgramEndDate}
+                  onChange={(e) => setCreateProgramEndDate(e.target.value)}
+                  className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
             {createProgramError && <p className="text-sm text-red-600">{createProgramError}</p>}
             <button
               type="submit"
@@ -333,6 +440,7 @@ export function SuperAdminContent() {
             <thead className="bg-gray-100">
               <tr>
                 <th className="p-3 text-left font-medium">Program</th>
+                <th className="p-3 text-left font-medium">Academic year</th>
                 <th className="p-3 text-left font-medium">Active</th>
                 <th className="p-3 text-left font-medium">Actions</th>
               </tr>
@@ -341,8 +449,22 @@ export function SuperAdminContent() {
               {programs.map((p) => (
                 <tr key={p.id} className="border-t border-gray-200">
                   <td className="p-3">{p.name}</td>
-                  <td className="p-3">{p.is_active !== false ? "Yes" : "No"}</td>
                   <td className="p-3">
+                    {p.default_academic_year
+                      ? formatYearRange(p.default_academic_year.start_date, p.default_academic_year.end_date)
+                      : "Not set"}
+                  </td>
+                  <td className="p-3">{p.is_active !== false ? "Yes" : "No"}</td>
+                  <td className="p-3 flex flex-wrap gap-2">
+                    {p.default_academic_year && (
+                      <button
+                        type="button"
+                        onClick={() => openEditAcademicYear(p)}
+                        className="px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-200"
+                      >
+                        Edit academic year
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => handleToggleProgramActive(p)}
@@ -356,6 +478,53 @@ export function SuperAdminContent() {
             </tbody>
           </table>
         </div>
+        {editYearOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Edit academic year</h3>
+              <form onSubmit={handleSaveEditAcademicYear} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Start date</label>
+                  <input
+                    type="date"
+                    value={editYearStart}
+                    onChange={(e) => setEditYearStart(e.target.value)}
+                    required
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">End date</label>
+                  <input
+                    type="date"
+                    value={editYearEnd}
+                    onChange={(e) => setEditYearEnd(e.target.value)}
+                    required
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  />
+                </div>
+                <p className="text-xs text-gray-500">Range must span 11–13 months.</p>
+                {editYearError && <p className="text-sm text-red-600">{editYearError}</p>}
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={closeEditAcademicYear}
+                    className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={editYearSaving}
+                    className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-60"
+                  >
+                    {editYearSaving ? "Saving…" : "Save"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </section>
 
       <section>
