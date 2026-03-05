@@ -149,7 +149,7 @@ export function RotationsSection({
           <p className="text-sm text-indigo-900">
             <span className="font-semibold">How it works:</span>{" "}
             <strong>1/mo</strong> = max residents per month •{" "}
-            <strong>1–3</strong> = eligible PGY levels •{" "}
+            <strong>1–5</strong> = eligible PGY levels •{" "}
             <strong>Consult</strong> / <strong>Transplant</strong> = special types (scheduler can avoid back-to-back months when enabled in rules)
           </p>
         </div>
