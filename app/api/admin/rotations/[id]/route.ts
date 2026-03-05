@@ -19,7 +19,7 @@ export async function PATCH(
     if (res) return NextResponse.json({ error: res.error }, { status: res.status });
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { supabase: db } = ctx;
+  const { programId, supabase: db } = ctx;
 
   const body = await request.json();
   const updates: Record<string, unknown> = {};
@@ -39,9 +39,13 @@ export async function PATCH(
     .from("rotations")
     .update(updates)
     .eq("id", id)
+    .eq("program_id", programId)
     .select()
     .single();
   if (error) {
+    if (error.code === "PGRST116") {
+      return NextResponse.json({ error: "Rotation not found in this program" }, { status: 404 });
+    }
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
   return NextResponse.json(data);
@@ -62,11 +66,20 @@ export async function DELETE(
     if (res) return NextResponse.json({ error: res.error }, { status: res.status });
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { supabase: db } = ctx;
+  const { programId, supabase: db } = ctx;
 
-  const { error } = await db.from("rotations").delete().eq("id", id);
+  const { data: deleted, error } = await db
+    .from("rotations")
+    .delete()
+    .eq("id", id)
+    .eq("program_id", programId)
+    .select("id")
+    .maybeSingle();
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  if (!deleted) {
+    return NextResponse.json({ error: "Rotation not found in this program" }, { status: 404 });
   }
   return NextResponse.json({ ok: true });
 }
