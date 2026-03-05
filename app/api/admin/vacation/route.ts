@@ -19,9 +19,9 @@ export async function GET(request: NextRequest) {
     if (res) return NextResponse.json({ error: res.error }, { status: res.status });
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { programId, supabase: db } = ctx;
+  const { programId } = ctx;
 
-  const { data: yearRow, error: yearErr } = await db
+  const { data: yearRow, error: yearErr } = await supabaseAdmin
     .from("academic_years")
     .select("program_id, start_date, end_date")
     .eq("id", academicYearId)
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
   const yearStart = yearRow.start_date as string;
   const yearEnd = yearRow.end_date as string;
 
-  const { data: months, error: monthsErr } = await db
+  const { data: months, error: monthsErr } = await supabaseAdmin
     .from("months")
     .select("id, month_index, month_label, start_date, end_date")
     .eq("academic_year_id", academicYearId)
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: monthsErr.message }, { status: 500 });
   }
 
-  const { data: residents, error: resErr } = await db
+  const { data: residents, error: resErr } = await supabaseAdmin
     .from("residents")
     .select("id, first_name, last_name, pgy")
     .eq("program_id", programId)
@@ -55,11 +55,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: resErr.message }, { status: 500 });
   }
 
-  const { data: vacationRows, error: vacErr } = await db
+  const residentIds = (residents ?? []).map((r) => r.id);
+  const vacationQuery = supabaseAdmin
     .from("vacation_requests")
     .select("id, resident_id, start_date, end_date")
     .lte("start_date", yearEnd)
     .gte("end_date", yearStart);
+  const { data: vacationRows, error: vacErr } = residentIds.length > 0
+    ? await vacationQuery.in("resident_id", residentIds)
+    : await vacationQuery.in("resident_id", ["00000000-0000-0000-0000-000000000000"]);
   if (vacErr) {
     return NextResponse.json({ error: vacErr.message }, { status: 500 });
   }
@@ -82,7 +86,7 @@ export async function POST(request: NextRequest) {
     if (res) return NextResponse.json({ error: res.error }, { status: res.status });
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { supabase: db } = ctx;
+  const { programId } = ctx;
 
   let body: { resident_id?: string; start_date?: string; end_date?: string };
   try {
@@ -112,7 +116,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { data, error } = await db
+  const { data: residentRow } = await supabaseAdmin
+    .from("residents")
+    .select("id")
+    .eq("id", resident_id)
+    .eq("program_id", programId)
+    .maybeSingle();
+  if (!residentRow) {
+    return NextResponse.json({ error: "Resident not found or not in your program" }, { status: 403 });
+  }
+
+  const { data, error } = await supabaseAdmin
     .from("vacation_requests")
     .insert({ resident_id, start_date: start, end_date: end })
     .select()
@@ -134,11 +148,27 @@ export async function DELETE(request: NextRequest) {
     if (res) return NextResponse.json({ error: res.error }, { status: res.status });
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { supabase: db } = ctx;
+  const { programId } = ctx;
 
   const id = request.nextUrl.searchParams.get("id");
   if (id) {
-    const { error } = await db.from("vacation_requests").delete().eq("id", id);
+    const { data: existing } = await supabaseAdmin
+      .from("vacation_requests")
+      .select("resident_id")
+      .eq("id", id)
+      .maybeSingle();
+    if (existing) {
+      const { data: residentRow } = await supabaseAdmin
+        .from("residents")
+        .select("id")
+        .eq("id", existing.resident_id)
+        .eq("program_id", programId)
+        .maybeSingle();
+      if (!residentRow) {
+        return NextResponse.json({ error: "Not authorized to delete this vacation request" }, { status: 403 });
+      }
+    }
+    const { error } = await supabaseAdmin.from("vacation_requests").delete().eq("id", id);
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
@@ -152,7 +182,16 @@ export async function DELETE(request: NextRequest) {
       { status: 400 }
     );
   }
-  const { error } = await db
+  const { data: residentRow } = await supabaseAdmin
+    .from("residents")
+    .select("id")
+    .eq("id", resident_id)
+    .eq("program_id", programId)
+    .maybeSingle();
+  if (!residentRow) {
+    return NextResponse.json({ error: "Not authorized to delete this vacation request" }, { status: 403 });
+  }
+  const { error } = await supabaseAdmin
     .from("vacation_requests")
     .delete()
     .eq("resident_id", resident_id)
