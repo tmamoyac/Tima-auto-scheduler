@@ -156,9 +156,12 @@ export function VacationSection({
   if (variant === "minimal") {
     return (
       <section>
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+        <div className="mb-2">
           <h2 className="text-lg font-semibold text-gray-900">Vacation Requests</h2>
-          <p className="text-sm text-gray-500">
+        </div>
+        <div className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3">
+          <p className="text-sm text-indigo-900">
+            <span className="font-semibold">How it works:</span>{" "}
             Add vacation weeks per resident. Dates must be within the academic year (
             {formatYearRangeShort(academicYearStart, academicYearEnd)}). Each range is up to 14 days.
           </p>
