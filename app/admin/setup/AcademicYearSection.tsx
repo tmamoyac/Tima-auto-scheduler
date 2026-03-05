@@ -104,7 +104,7 @@ export function AcademicYearSection({
     }
   };
 
-  const useYear = (id: string) => {
+  const switchToYear = (id: string) => {
     const params = new URLSearchParams(window.location.search);
     params.set("tab", "setup");
     params.set("programId", programId);
@@ -149,7 +149,7 @@ export function AcademicYearSection({
               {y.id !== currentYearId && (
                 <button
                   type="button"
-                  onClick={() => useYear(y.id)}
+                  onClick={() => switchToYear(y.id)}
                   className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
                 >
                   Use this year
