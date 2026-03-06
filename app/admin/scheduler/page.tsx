@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Suspense } from "react";
+import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getSchedulerContext } from "@/lib/auth/schedulerContext";
@@ -235,6 +236,15 @@ export default async function SchedulerPage({
   const { programId, academicYearId, programName, academicYearStart, academicYearEnd, isSuperAdmin } = context;
   const versionIdParam = typeof params.versionId === "string" ? params.versionId : undefined;
   const tabParam = params.tab === "setup" || params.tab === "schedule" ? params.tab : "schedule";
+
+  // Super admin without programId in URL: redirect so URL is always the source of truth
+  if (isSuperAdmin && !programIdOverride) {
+    const search = new URLSearchParams();
+    search.set("tab", tabParam);
+    search.set("programId", programId);
+    if (academicYearId) search.set("academicYearId", academicYearId);
+    redirect(`/admin/scheduler?${search.toString()}`);
+  }
 
   // Setup tab: skip schedule data fetches so the page loads immediately
   if (tabParam === "setup") {

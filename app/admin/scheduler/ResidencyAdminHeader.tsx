@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/apiFetch";
 import { safeParseJson } from "@/lib/fetchJson";
 import { TimaLogo } from "@/app/components/TimaLogo";
@@ -7,7 +8,7 @@ import { TimaLogo } from "@/app/components/TimaLogo";
 type Program = { id: string; name: string };
 
 export function ResidencyAdminHeader({
-  programId,
+  programId: programIdProp,
   currentTab,
   isSuperAdmin,
   showSuperAdminLink = false,
@@ -19,6 +20,11 @@ export function ResidencyAdminHeader({
   showSuperAdminLink?: boolean;
   programName?: string;
 }) {
+  const searchParams = useSearchParams();
+  const programIdFromUrl = searchParams.get("programId") ?? searchParams.get("programid");
+  const programId =
+    typeof programIdFromUrl === "string" && programIdFromUrl.length > 0 ? programIdFromUrl : programIdProp;
+
   const [programs, setPrograms] = useState<Program[]>([]);
   const [loading, setLoading] = useState(isSuperAdmin);
   const [fetchError, setFetchError] = useState(false);
@@ -87,25 +93,31 @@ export function ResidencyAdminHeader({
                 <select
                   id="program-selector"
                   name="programId"
-                  key={programId}
-                  defaultValue={programId}
+                  value={programId}
                   onChange={(e) => {
-                    const form = e.currentTarget.form;
-                    if (!form) return;
                     const selected = e.target.value;
                     if (!selected) return;
-                    const params = new URLSearchParams({ tab, programId: selected });
-                    window.location.assign(`${form.action}?${params.toString()}`);
+                    const curr = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+                    curr.set("tab", tab);
+                    curr.set("programId", selected);
+                    curr.delete("academicYearId");
+                    window.location.assign(`/admin/scheduler?${curr.toString()}`);
                   }}
                   disabled={displayLoading || displayPrograms.length === 0}
                   className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium bg-white min-w-[220px] focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:opacity-60 disabled:cursor-not-allowed text-gray-700"
                 >
                 {displayLoading ? (
-                  <option value="">Loading programs…</option>
+                  <option value={programId}>{currentProgramName}</option>
                 ) : fetchError ? (
-                  <option value="">Failed to load programs</option>
+                  <>
+                    {programId && <option value={programId}>{currentProgramName}</option>}
+                    <option value="">Failed to load programs</option>
+                  </>
                 ) : displayPrograms.length === 0 ? (
-                  <option value="">No programs</option>
+                  <>
+                    {programId && <option value={programId}>{currentProgramName}</option>}
+                    <option value="">No programs</option>
+                  </>
                 ) : (
                   displayPrograms.map((p) => (
                     <option key={p.id} value={p.id}>
