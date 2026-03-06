@@ -56,36 +56,31 @@ export async function getSchedulerContext(
     };
   }
 
+  // Super admin with no URL programId: use first active program so we don't hit DEACTIVATED when profile's program is inactive
   if (sa && !programIdOverride) {
-    try {
-      const ctx = await requireDirectorContext(supabase);
+    const firstProgram = await getFirstProgram(supabaseAdmin);
+    if (firstProgram) {
+      const { programId, academicYearId } = await resolveProgramWithAdmin(
+        supabaseAdmin,
+        firstProgram.id,
+        academicYearIdOverride
+      );
       return {
-        programId: ctx.programId,
-        academicYearId: ctx.academicYearId,
-        userId: ctx.userId,
-        useAdminClient: false,
+        programId,
+        academicYearId,
+        userId: user.id,
+        useAdminClient: true,
         isSuperAdmin: true,
       };
-    } catch (e) {
-      if (e instanceof Error && e.message === "NO_PROFILE") {
-        const firstProgram = await getFirstProgram(supabaseAdmin);
-        if (firstProgram) {
-          const { programId, academicYearId } = await resolveProgramWithAdmin(
-            supabaseAdmin,
-            firstProgram.id,
-            academicYearIdOverride
-          );
-          return {
-            programId,
-            academicYearId,
-            userId: user.id,
-            useAdminClient: true,
-            isSuperAdmin: true,
-          };
-        }
-      }
-      throw e;
     }
+    const ctx = await requireDirectorContext(supabase);
+    return {
+      programId: ctx.programId,
+      academicYearId: ctx.academicYearId,
+      userId: ctx.userId,
+      useAdminClient: false,
+      isSuperAdmin: true,
+    };
   }
 
   const ctx = await requireDirectorContext(supabase);
