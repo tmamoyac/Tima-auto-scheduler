@@ -23,6 +23,7 @@ type ContextResult =
       isSuperAdmin: boolean;
     }
   | { error: "DEACTIVATED" }
+  | { error: "PROGRAM_DEACTIVATED" }
   | null;
 
 async function getContext(
@@ -75,6 +76,9 @@ async function getContext(
   } catch (e) {
     if (e instanceof Error && e.message === "DEACTIVATED") {
       return { error: "DEACTIVATED" };
+    }
+    if (e instanceof Error && e.message === "PROGRAM_DEACTIVATED") {
+      return { error: "PROGRAM_DEACTIVATED" };
     }
     return null;
   }
@@ -217,6 +221,16 @@ export default async function SchedulerPage({
         <h1 className="text-2xl font-semibold mb-4">Scheduler</h1>
         <p className="text-gray-600">
           Your account has been deactivated. Contact your program administrator to restore access.
+        </p>
+      </div>
+    );
+  }
+  if (context && "error" in context && context.error === "PROGRAM_DEACTIVATED") {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-semibold mb-4">Scheduler</h1>
+        <p className="text-gray-600">
+          The program you are assigned to has been deactivated. Contact your system administrator to reactivate the program.
         </p>
       </div>
     );

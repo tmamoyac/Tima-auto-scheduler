@@ -31,7 +31,7 @@ export async function requireDirectorContext(
 
   const isActive = profile?.is_active !== false;
   if (!isActive && !isSuperAdmin(user.email ?? undefined)) {
-    throw new Error("DEACTIVATED");
+    throw new Error("DEACTIVATED"); // User account deactivated
   }
 
   const programId = profile.program_id as string;
@@ -44,7 +44,7 @@ export async function requireDirectorContext(
 
   const programIsActive = (program as { is_active?: boolean } | null)?.is_active !== false;
   if (!programIsActive && !isSuperAdmin(user.email ?? undefined)) {
-    throw new Error("DEACTIVATED");
+    throw new Error("PROGRAM_DEACTIVATED"); // Program deactivated (user may still be active)
   }
 
   const today = new Date().toISOString().slice(0, 10);
@@ -81,6 +81,7 @@ export function directorAuthErrorResponse(e: unknown): { status: number; error: 
   if (msg === "UNAUTHENTICATED") return { status: 401, error: "Unauthorized" };
   if (msg === "NO_PROFILE") return { status: 403, error: "No profile found for user" };
   if (msg === "DEACTIVATED") return { status: 403, error: "Account deactivated" };
+  if (msg === "PROGRAM_DEACTIVATED") return { status: 403, error: "Program deactivated" };
   return null;
 }
 

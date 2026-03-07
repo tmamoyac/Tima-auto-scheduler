@@ -89,6 +89,12 @@ async function getCheckResult(): Promise<{
         status: "fail",
         detail: "Account deactivated. Contact your program administrator.",
       });
+    } else if (msg === "PROGRAM_DEACTIVATED") {
+      steps.push({
+        name: "Program",
+        status: "fail",
+        detail: "Your program has been deactivated. Contact your system administrator to reactivate it.",
+      });
     } else {
       steps.push({
         name: "Connection",

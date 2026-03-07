@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/apiFetch";
 import { safeParseJson } from "@/lib/fetchJson";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { TimaLogo } from "@/app/components/TimaLogo";
 
 type Program = { id: string; name: string };
@@ -28,6 +29,20 @@ export function ResidencyAdminHeader({
   const [programs, setPrograms] = useState<Program[]>([]);
   const [loading, setLoading] = useState(isSuperAdmin);
   const [fetchError, setFetchError] = useState(false);
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+
+  async function openAccountModal() {
+    const supabase = createSupabaseBrowserClient();
+    const { data, error } = await supabase.auth.getUser();
+    if (error || !data.user) {
+      setUserEmail(null); // null = not signed in
+    } else {
+      const email = data.user.email;
+      setUserEmail(email !== undefined && email !== null ? email : ""); // "" = no email
+    }
+    setShowEmailModal(true);
+  }
 
   useEffect(() => {
     if (!isSuperAdmin) {
@@ -146,12 +161,15 @@ export function ResidencyAdminHeader({
                 />
               </svg>
             </button>
-            <div
-              className="w-9 h-9 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-sm font-medium"
-              title="Admin"
+            <button
+              type="button"
+              onClick={openAccountModal}
+              className="w-9 h-9 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-sm font-medium cursor-pointer hover:bg-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              aria-label="Show account"
+              title="Show account"
             >
               A
-            </div>
+            </button>
             {showSuperAdminLink && (
               <a
                 href="/admin/super"
@@ -171,6 +189,39 @@ export function ResidencyAdminHeader({
           </div>
         </div>
       </div>
+
+      {showEmailModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setShowEmailModal(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="account-modal-title"
+        >
+          <div
+            className="bg-white rounded-xl shadow-lg max-w-md w-full p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="account-modal-title" className="text-lg font-semibold text-gray-900 mb-2">
+              Logged in as
+            </h2>
+            <p className="text-sm text-gray-700 mb-4 break-all">
+              {userEmail === null
+                ? "Not signed in"
+                : userEmail === ""
+                  ? "Email not available"
+                  : userEmail}
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowEmailModal(false)}
+              className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-sm font-medium rounded-lg"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </header>
   );
 }
