@@ -173,18 +173,23 @@ export function ResidencyAdminHeader({
               >
                 A
               </div>
+              {/* Meta-style account tooltip: card aligned under avatar, horizontal text */}
               <div
-                className="absolute right-0 top-full mt-2 z-50 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg shadow-lg max-w-[280px] break-all opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity pointer-events-none"
+                className="absolute right-0 top-full mt-2 z-50 w-[280px] min-w-[240px] text-left rounded-xl border border-gray-200 bg-white py-3 px-4 shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity pointer-events-none"
                 role="tooltip"
               >
-                Logged in as:{" "}
-                {userEmail === undefined
-                  ? "…"
-                  : userEmail === null
-                    ? "Not signed in"
-                    : userEmail === ""
-                      ? "Email not available"
-                      : userEmail}
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+                  Logged in as
+                </p>
+                <p className="text-sm text-gray-900 break-all">
+                  {userEmail === undefined
+                    ? "…"
+                    : userEmail === null
+                      ? "Not signed in"
+                      : userEmail === ""
+                        ? "Email not available"
+                        : userEmail}
+                </p>
               </div>
             </div>
             {showSuperAdminLink && (
