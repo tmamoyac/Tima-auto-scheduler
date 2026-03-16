@@ -16,6 +16,7 @@ type Rotation = {
   eligible_pgy_max: number;
   is_consult?: boolean;
   is_transplant?: boolean;
+  is_primary_site?: boolean;
 };
 type Requirement = { pgy: number; rotation_id: string; min_months_required: number };
 type VacationRange = { resident_id: string; start_date: string; end_date: string };
@@ -82,7 +83,7 @@ export async function generateSchedule({
 
   const { data: rotations, error: rotationsErr } = await supabaseAdmin
     .from("rotations")
-    .select("id, program_id, capacity_per_month, eligible_pgy_min, eligible_pgy_max, is_consult, is_transplant")
+    .select("id, program_id, capacity_per_month, eligible_pgy_min, eligible_pgy_max, is_consult, is_transplant, is_primary_site")
     .eq("program_id", programId);
 
   if (rotationsErr) throw rotationsErr;
@@ -90,19 +91,32 @@ export async function generateSchedule({
 
   const { data: programRow } = await supabaseAdmin
     .from("programs")
-    .select("avoid_back_to_back_consult, no_consult_when_vacation_in_month, avoid_back_to_back_transplant")
+    .select("avoid_back_to_back_consult, no_consult_when_vacation_in_month, avoid_back_to_back_transplant, prefer_primary_site_for_long_vacation, require_pgy_start_at_primary_site, pgy_start_at_primary_site")
     .eq("id", programId)
     .single();
-  const program = programRow as { avoid_back_to_back_consult?: boolean; no_consult_when_vacation_in_month?: boolean; avoid_back_to_back_transplant?: boolean } | null;
+  const program = programRow as {
+    avoid_back_to_back_consult?: boolean;
+    no_consult_when_vacation_in_month?: boolean;
+    avoid_back_to_back_transplant?: boolean;
+    prefer_primary_site_for_long_vacation?: boolean;
+    require_pgy_start_at_primary_site?: boolean;
+    pgy_start_at_primary_site?: number | null;
+  } | null;
   const avoidBackToBackConsult = program?.avoid_back_to_back_consult === true;
   const noConsultWhenVacationInMonth = program?.no_consult_when_vacation_in_month === true;
   const avoidBackToBackTransplant = program?.avoid_back_to_back_transplant === true;
+  const preferPrimarySiteForLongVacation = program?.prefer_primary_site_for_long_vacation === true;
+  const requirePgyStartAtPrimarySite = program?.require_pgy_start_at_primary_site === true;
+  const pgyStartAtPrimarySite =
+    typeof program?.pgy_start_at_primary_site === "number" ? program.pgy_start_at_primary_site : 4;
 
   const consultRotationIds = new Set<string>();
   const transplantRotationIds = new Set<string>();
+  const primarySiteRotationIds = new Set<string>();
   for (const rot of rotationsList) {
     if ((rot as Rotation & { is_consult?: boolean }).is_consult) consultRotationIds.add(rot.id);
     if ((rot as Rotation & { is_transplant?: boolean }).is_transplant) transplantRotationIds.add(rot.id);
+    if ((rot as Rotation & { is_primary_site?: boolean }).is_primary_site) primarySiteRotationIds.add(rot.id);
   }
 
   const { data: yearRow } = await supabaseAdmin
@@ -130,6 +144,15 @@ export async function generateSchedule({
       );
       if (hasOverlap) vacationSet.add(residentMonthKey(resident.id, month.id));
     }
+  }
+
+  const LONG_VACATION_DAYS = 14;
+  const residentsWithLongVacation = new Set<string>();
+  for (const v of vacationRanges) {
+    const startMs = new Date(v.start_date).getTime();
+    const endMs = new Date(v.end_date).getTime();
+    const days = Math.round((endMs - startMs) / (24 * 60 * 60 * 1000)) + 1;
+    if (days >= LONG_VACATION_DAYS) residentsWithLongVacation.add(v.resident_id);
   }
 
   const { data: fixedRulesRows } = await supabaseAdmin
@@ -260,6 +283,16 @@ export async function generateSchedule({
           const rem = capacity.get(capKey(month.id, rot.id)) ?? 0;
           return rem > 0;
         });
+        if (
+          monthIndex === 0 &&
+          requirePgyStartAtPrimarySite &&
+          resident.pgy === pgyStartAtPrimarySite &&
+          primarySiteRotationIds.size > 0 &&
+          eligible.length > 0
+        ) {
+          const primaryOnly = eligible.filter((rot) => primarySiteRotationIds.has(rot.id));
+          if (primaryOnly.length > 0) eligible = primaryOnly;
+        }
         if (onVacation && noConsultWhenVacationInMonth && consultRotationIds.size > 0) {
           eligible = eligible.filter((rot) => !consultRotationIds.has(rot.id));
         }
@@ -283,6 +316,26 @@ export async function generateSchedule({
         if (hadTransplantLastMonth && candidatePool.length > 0) {
           const eligibleNonTransplant = candidatePool.filter((rot) => !transplantRotationIds.has(rot.id));
           if (eligibleNonTransplant.length > 0) candidatePool = eligibleNonTransplant;
+        }
+        if (
+          !onVacation &&
+          preferPrimarySiteForLongVacation &&
+          residentsWithLongVacation.has(resident.id) &&
+          primarySiteRotationIds.size > 0 &&
+          candidatePool.length > 0
+        ) {
+          const primarySiteCandidates = candidatePool.filter((rot) => primarySiteRotationIds.has(rot.id));
+          if (primarySiteCandidates.length > 0) {
+            const requiredWithCapacityPrimary = primarySiteCandidates.filter((rot) => {
+              const rem = required.get(reqKey(resident.id, rot.id)) ?? 0;
+              return rem > 0;
+            });
+            if (requiredWithCapacityPrimary.length > 0) {
+              candidatePool = requiredWithCapacityPrimary;
+            } else {
+              candidatePool = primarySiteCandidates;
+            }
+          }
         }
         const requiredWithCapacity = candidatePool.filter((rot) => {
           const rem = required.get(reqKey(resident.id, rot.id)) ?? 0;

@@ -85,6 +85,7 @@ export async function PATCH(
   const newStart = updates.start_date ?? (existingYear as { start_date: string }).start_date;
   const newEnd = updates.end_date ?? (existingYear as { end_date: string }).end_date;
 
+  let duplicateYearIdToRemove: string | null = null;
   if (updates.start_date !== undefined || updates.end_date !== undefined) {
     if (!newStart || !newEnd) {
       return NextResponse.json({ error: "start_date and end_date are required when changing dates" }, { status: 400 });
@@ -108,17 +109,23 @@ export async function PATCH(
         { status: 400 }
       );
     }
+    // Only check overlap within the same program (programs are siloed).
+    const programIdForOverlap = (existingYear as { program_id: string }).program_id;
     const { data: otherYears } = await supabaseAdmin
       .from("academic_years")
       .select("id, start_date, end_date")
-      .eq("program_id", (existingYear as { program_id: string }).program_id)
+      .eq("program_id", programIdForOverlap)
       .neq("id", id);
     for (const y of otherYears ?? []) {
       const es = (y as { start_date: string }).start_date;
       const ee = (y as { end_date: string }).end_date;
       if (newStart <= ee && newEnd >= es) {
+        if (es === newStart && ee === newEnd) {
+          duplicateYearIdToRemove = (y as { id: string }).id;
+          break;
+        }
         return NextResponse.json(
-          { error: "Academic year dates overlap with an existing year" },
+          { error: "Academic year dates overlap with another year in this program" },
           { status: 400 }
         );
       }
@@ -157,6 +164,19 @@ export async function PATCH(
     const { error: monthsErr } = await supabaseAdmin.from("months").insert(monthsToInsert);
     if (monthsErr) {
       return NextResponse.json({ error: monthsErr.message }, { status: 500 });
+    }
+    if (duplicateYearIdToRemove) {
+      const { error: dupErr } = await supabaseAdmin
+        .from("academic_years")
+        .delete()
+        .eq("id", duplicateYearIdToRemove)
+        .eq("program_id", programId);
+      if (dupErr) {
+        return NextResponse.json(
+          { error: "Updated year but failed to remove duplicate: " + dupErr.message },
+          { status: 500 }
+        );
+      }
     }
   }
 

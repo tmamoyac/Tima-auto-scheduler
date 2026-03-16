@@ -101,16 +101,17 @@ export function VacationSection({
     vacationRequests.filter((v) => v.resident_id === residentId);
 
   const addRange = async (residentId: string) => {
-    if (!newStart || !newEnd) {
+    const endDate = newEnd || newStart;
+    if (!newStart || !endDate) {
       alert("Enter start and end date.");
       return;
     }
-    if (newStart > newEnd) {
+    if (newStart > endDate) {
       alert("Start date must be before or equal to end date.");
       return;
     }
     if (academicYearStart && academicYearEnd) {
-      if (newStart < academicYearStart || newEnd > academicYearEnd) {
+      if (newStart < academicYearStart || endDate > academicYearEnd) {
         alert(
           `Vacation dates must be within the academic year (${formatYearRangeShort(academicYearStart, academicYearEnd)}).`
         );
@@ -128,7 +129,7 @@ export function VacationSection({
           body: JSON.stringify({
             resident_id: residentId,
             start_date: newStart,
-            end_date: newEnd,
+            end_date: endDate,
           }),
         }
       );
@@ -192,7 +193,11 @@ export function VacationSection({
                         <button
                           type="button"
                           className="text-sm px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg"
-                          onClick={() => setAddingFor(r.id)}
+                          onClick={() => {
+                            setAddingFor(r.id);
+                            setNewStart(academicYearStart || "");
+                            setNewEnd("");
+                          }}
                         >
                           + Add Request
                         </button>
@@ -227,15 +232,20 @@ export function VacationSection({
                             max={academicYearEnd || undefined}
                             onChange={(e) => setNewStart(e.target.value)}
                             className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                            title="Start date – calendar opens to this date"
                           />
                           <span className="text-sm text-gray-500">to</span>
                           <input
                             type="date"
-                            value={newEnd}
-                            min={academicYearStart || undefined}
+                            value={newEnd || (newStart || undefined)}
+                            min={newStart || academicYearStart || undefined}
                             max={academicYearEnd || undefined}
                             onChange={(e) => setNewEnd(e.target.value)}
+                            onFocus={() => {
+                              if (!newEnd && newStart) setNewEnd(newStart);
+                            }}
                             className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                            title="End date – calendar opens to start date when possible"
                           />
                           <button
                             type="button"
@@ -319,15 +329,20 @@ export function VacationSection({
                         max={academicYearEnd || undefined}
                         onChange={(e) => setNewStart(e.target.value)}
                         className="border border-gray-300 rounded px-2 py-1 text-sm"
+                        title="Start date – calendar opens to this date"
                       />
                       <span className="text-sm">to</span>
                       <input
                         type="date"
-                        value={newEnd}
-                        min={academicYearStart || undefined}
+                        value={newEnd || (newStart || undefined)}
+                        min={newStart || academicYearStart || undefined}
                         max={academicYearEnd || undefined}
                         onChange={(e) => setNewEnd(e.target.value)}
+                        onFocus={() => {
+                          if (!newEnd && newStart) setNewEnd(newStart);
+                        }}
                         className="border border-gray-300 rounded px-2 py-1 text-sm"
+                        title="End date – calendar opens to start date when possible"
                       />
                       <button
                         type="button"
@@ -353,7 +368,11 @@ export function VacationSection({
                     <button
                       type="button"
                       className="text-sm px-2 py-1 border border-gray-300 rounded bg-white hover:bg-gray-100"
-                      onClick={() => setAddingFor(r.id)}
+                      onClick={() => {
+                        setAddingFor(r.id);
+                        setNewStart(academicYearStart || "");
+                        setNewEnd("");
+                      }}
                     >
                       Add week
                     </button>

@@ -327,6 +327,9 @@ export default async function SchedulerPage({
       <h1 className="text-2xl font-semibold mb-4">Scheduler</h1>
       <p className="text-sm text-gray-600 mb-2">
         Residents: {residents.length} · Months: {months.length}
+        {months.length < 12 && (
+          <span className="text-amber-700 ml-1">(Expected 12 months for the academic year; refresh or re-edit the academic year to regenerate months.)</span>
+        )}
         {selectedVersionId
           ? ` · Showing: ${selectedVersion?.version_name ?? "Unnamed"}${selectedVersion?.is_final ? " (Final)" : ""}`
           : " · No schedule generated yet"}
@@ -338,28 +341,34 @@ export default async function SchedulerPage({
         <table className="border-collapse border border-gray-300 text-sm">
           <thead>
             <tr>
-              <th className="border border-gray-300 bg-gray-100 p-2 text-left sticky left-0 z-10 min-w-[140px]">
+              <th className="border border-gray-300 bg-gray-100 px-2 py-1.5 text-left sticky left-0 z-10 min-w-[100px]">
                 Resident
               </th>
-              {monthsTyped.map((m) => (
-                <th
-                  key={m.id}
-                  className="border border-gray-300 bg-gray-100 p-2 text-center min-w-[100px]"
-                >
-                  {m.month_label}
-                </th>
-              ))}
+              {monthsTyped.map((m) => {
+                const shortLabel = m.month_label ? (m.month_label.slice(0, 3) + (m.month_label.includes("2027") ? " '27" : " '26")) : "";
+                return (
+                  <th
+                    key={m.id}
+                    className="border border-gray-300 bg-gray-100 px-1 py-1.5 text-center min-w-[64px] max-w-[80px]"
+                    title={m.month_label ?? undefined}
+                  >
+                    <span className="truncate block" title={m.month_label ?? undefined}>
+                      {shortLabel || m.month_label}
+                    </span>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
             {residents.map((r) => (
               <tr key={r.id}>
-                <td className="border border-gray-300 p-2 sticky left-0 bg-white z-10 font-medium">
+                <td className="border border-gray-300 px-2 py-1.5 sticky left-0 bg-white z-10 font-medium min-w-[100px] text-xs">
                   {r.first_name} {r.last_name} (PGY{r.pgy})
                 </td>
                 {monthsTyped.map((m) => {
                   const key = `${r.id}_${m.id}`;
-                  const rotationLabel = cellRotationLabel.get(key) ?? "Unassigned";
+                  const rotationLabel = cellRotationLabel.get(key) ?? "—";
                   const mStart = m.start_date ?? "";
                   const mEnd = m.end_date ?? "";
                   const vacationLabels =
@@ -367,11 +376,13 @@ export default async function SchedulerPage({
                       ? getVacationLabelsInMonth(vacationRequests, r.id, mStart, mEnd)
                       : [];
                   return (
-                    <td key={m.id} className="border border-gray-300 p-2 text-center text-gray-700 align-top">
+                    <td key={m.id} className="border border-gray-300 px-1 py-1.5 text-center text-gray-700 align-top min-w-[64px] max-w-[80px]">
                       <div className="flex flex-col gap-0.5">
-                        <span>{rotationLabel}</span>
+                        <span className="text-xs block break-words" title={rotationLabel}>
+                          {rotationLabel}
+                        </span>
                         {vacationLabels.length > 0 && (
-                          <span className="text-xs text-amber-700" title="Vacation">
+                          <span className="text-[10px] text-amber-700 block break-words" title={`Vacation: ${vacationLabels.join(", ")}`}>
                             Vac: {vacationLabels.join(", ")}
                           </span>
                         )}

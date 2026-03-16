@@ -66,6 +66,7 @@ export async function POST(request: NextRequest) {
       eligible_pgy_max: Number(eligible_pgy_max),
       is_consult: body.is_consult === true,
       is_transplant: body.is_transplant === true,
+      is_primary_site: body.is_primary_site === true,
     })
     .select()
     .single();

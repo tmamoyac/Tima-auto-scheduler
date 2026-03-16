@@ -14,6 +14,7 @@ type Rotation = {
   eligible_pgy_max: number;
   is_consult?: boolean;
   is_transplant?: boolean;
+  is_primary_site?: boolean;
 };
 
 export function RotationsSection({
@@ -40,6 +41,7 @@ export function RotationsSection({
     eligible_pgy_max: 3,
     is_consult: false,
     is_transplant: false,
+    is_primary_site: false,
   });
   const [saving, setSaving] = useState(false);
 
@@ -78,7 +80,7 @@ export function RotationsSection({
   const openAdd = () => {
     setEditing(null);
     setAdding(true);
-    setForm({ name: "", capacity_per_month: 4, eligible_pgy_min: 1, eligible_pgy_max: 3, is_consult: false, is_transplant: false });
+    setForm({ name: "", capacity_per_month: 4, eligible_pgy_min: 1, eligible_pgy_max: 3, is_consult: false, is_transplant: false, is_primary_site: false });
   };
 
   const openEdit = (r: Rotation) => {
@@ -91,6 +93,7 @@ export function RotationsSection({
       eligible_pgy_max: r.eligible_pgy_max,
       is_consult: r.is_consult === true,
       is_transplant: r.is_transplant === true,
+      is_primary_site: r.is_primary_site === true,
     });
   };
 
@@ -156,7 +159,8 @@ export function RotationsSection({
             <span className="font-semibold">How it works:</span>{" "}
             <strong>1/mo</strong> = max residents per month •{" "}
             <strong>1-5</strong> = eligible PGY levels •{" "}
-            <strong>Consult</strong> / <strong>Transplant</strong> = special types (scheduler can avoid back-to-back months when enabled in rules)
+            <strong>Consult</strong> / <strong>Transplant</strong> = special types (scheduler can avoid back-to-back months when enabled in rules).{" "}
+            <strong>Primary site</strong> = rotations at your main site; used when &quot;Prefer primary-site for long vacation&quot; is on in Scheduling Rules.
           </p>
         </div>
         {loading ? (
@@ -191,7 +195,12 @@ export function RotationsSection({
                         Transplant
                       </span>
                     )}
-                    {!r.is_consult && !r.is_transplant && (
+                    {r.is_primary_site && (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
+                        Primary site
+                      </span>
+                    )}
+                    {!r.is_consult && !r.is_transplant && !r.is_primary_site && (
                       <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
                         Other
                       </span>
@@ -264,6 +273,15 @@ export function RotationsSection({
                   />
                   Transplant
                 </label>
+                <label className="flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={form.is_primary_site}
+                    onChange={(e) => setForm((f) => ({ ...f, is_primary_site: e.target.checked }))}
+                    className="rounded"
+                  />
+                  Primary site
+                </label>
                 <button
                   type="button"
                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg disabled:opacity-50"
@@ -285,6 +303,7 @@ export function RotationsSection({
                       eligible_pgy_max: 3,
                       is_consult: false,
                       is_transplant: false,
+                      is_primary_site: false,
                     });
                   }}
                 >
@@ -315,6 +334,7 @@ export function RotationsSection({
                 <th className="border border-gray-300 bg-gray-100 p-2 text-left">Eligible PGY</th>
                 <th className="border border-gray-300 bg-gray-100 p-2 text-left">Consult</th>
                 <th className="border border-gray-300 bg-gray-100 p-2 text-left">Transplant</th>
+                <th className="border border-gray-300 bg-gray-100 p-2 text-left">Primary site</th>
                 <th className="border border-gray-300 bg-gray-100 p-2 text-left">Actions</th>
               </tr>
             </thead>
@@ -328,6 +348,7 @@ export function RotationsSection({
                   </td>
                   <td className="border border-gray-300 p-2">{r.is_consult ? "Yes" : "No"}</td>
                   <td className="border border-gray-300 p-2">{r.is_transplant ? "Yes" : "No"}</td>
+                  <td className="border border-gray-300 p-2">{r.is_primary_site ? "Yes" : "No"}</td>
                   <td className="border border-gray-300 p-2">
                     <button
                       type="button"
@@ -410,6 +431,15 @@ export function RotationsSection({
                   />
                   Transplant
                 </label>
+                <label className="flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={form.is_primary_site}
+                    onChange={(e) => setForm((f) => ({ ...f, is_primary_site: e.target.checked }))}
+                    className="rounded"
+                  />
+                  Primary site
+                </label>
                 <button
                   type="button"
                   className="px-3 py-1.5 bg-blue-600 text-white rounded"
@@ -424,7 +454,7 @@ export function RotationsSection({
                   onClick={() => {
                     setEditing(null);
                     setAdding(false);
-                    setForm({ name: "", capacity_per_month: 4, eligible_pgy_min: 1, eligible_pgy_max: 3, is_consult: false, is_transplant: false });
+                    setForm({ name: "", capacity_per_month: 4, eligible_pgy_min: 1, eligible_pgy_max: 3, is_consult: false, is_transplant: false, is_primary_site: false });
                   }}
                 >
                   Cancel

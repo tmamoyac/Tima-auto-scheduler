@@ -40,6 +40,10 @@ export async function GET(
     avoid_back_to_back_consult: row.avoid_back_to_back_consult === true,
     no_consult_when_vacation_in_month: row.no_consult_when_vacation_in_month === true,
     avoid_back_to_back_transplant: row.avoid_back_to_back_transplant === true,
+    prefer_primary_site_for_long_vacation: row.prefer_primary_site_for_long_vacation === true,
+    require_pgy_start_at_primary_site: row.require_pgy_start_at_primary_site === true,
+    pgy_start_at_primary_site:
+      typeof row.pgy_start_at_primary_site === "number" ? row.pgy_start_at_primary_site : 4,
   });
 }
 
@@ -63,7 +67,14 @@ export async function PATCH(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: { avoid_back_to_back_consult?: boolean; no_consult_when_vacation_in_month?: boolean; avoid_back_to_back_transplant?: boolean };
+  let body: {
+    avoid_back_to_back_consult?: boolean;
+    no_consult_when_vacation_in_month?: boolean;
+    avoid_back_to_back_transplant?: boolean;
+    prefer_primary_site_for_long_vacation?: boolean;
+    require_pgy_start_at_primary_site?: boolean;
+    pgy_start_at_primary_site?: number;
+  };
   try {
     body = await request.json();
   } catch {
@@ -76,6 +87,14 @@ export async function PATCH(
     updates.no_consult_when_vacation_in_month = Boolean(body.no_consult_when_vacation_in_month);
   if (body.avoid_back_to_back_transplant !== undefined)
     updates.avoid_back_to_back_transplant = Boolean(body.avoid_back_to_back_transplant);
+  if (body.prefer_primary_site_for_long_vacation !== undefined)
+    updates.prefer_primary_site_for_long_vacation = Boolean(body.prefer_primary_site_for_long_vacation);
+  if (body.require_pgy_start_at_primary_site !== undefined)
+    updates.require_pgy_start_at_primary_site = Boolean(body.require_pgy_start_at_primary_site);
+  if (body.pgy_start_at_primary_site !== undefined) {
+    const n = Number(body.pgy_start_at_primary_site);
+    updates.pgy_start_at_primary_site = Number.isInteger(n) && n >= 1 && n <= 5 ? n : 4;
+  }
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });
   }

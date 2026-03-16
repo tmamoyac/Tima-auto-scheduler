@@ -32,6 +32,7 @@ export async function PATCH(
     updates.eligible_pgy_max = Number(body.eligible_pgy_max);
   if (body.is_consult !== undefined) updates.is_consult = Boolean(body.is_consult);
   if (body.is_transplant !== undefined) updates.is_transplant = Boolean(body.is_transplant);
+  if (body.is_primary_site !== undefined) updates.is_primary_site = Boolean(body.is_primary_site);
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });
   }
