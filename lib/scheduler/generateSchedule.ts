@@ -272,7 +272,15 @@ export async function generateSchedule({
           const ruleRotation = rotationById.get(ruleRotationId);
           if (ruleRotation) {
             const rem = capacity.get(capKey(month.id, ruleRotation.id)) ?? 0;
-            if (rem > 0) chosenRotation = ruleRotation;
+            const isFirstMonthPgyMustBePrimary =
+              monthIndex === 0 &&
+              requirePgyStartAtPrimarySite &&
+              resident.pgy === pgyStartAtPrimarySite &&
+              primarySiteRotationIds.size > 0;
+            const fixedIsPrimary = primarySiteRotationIds.has(ruleRotation.id);
+            if (rem > 0 && (!isFirstMonthPgyMustBePrimary || fixedIsPrimary)) {
+              chosenRotation = ruleRotation;
+            }
           }
         }
         // When onVacation && noConsultWhenVacationInMonth: fall through to assign non-consult below.
