@@ -146,7 +146,8 @@ export async function generateSchedule({
     }
   }
 
-  const LONG_VACATION_DAYS = 14;
+  // "More than one week" = 8+ days (so Feb 1–12, etc. gets primary-site preference)
+  const LONG_VACATION_DAYS = 8;
   const residentsWithLongVacation = new Set<string>();
   for (const v of vacationRanges) {
     const startMs = new Date(v.start_date).getTime();
