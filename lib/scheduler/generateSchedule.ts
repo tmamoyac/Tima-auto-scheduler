@@ -217,6 +217,9 @@ export async function generateSchedule({
     }
   }
 
+  const initialRequired = new Map<string, number>();
+  for (const [k, v] of required) initialRequired.set(k, v);
+
   const initialReqTotalByResident = new Map<string, number>();
   for (const r of residentsList) {
     let t = 0;
@@ -535,9 +538,13 @@ export async function generateSchedule({
             );
             chosenRotation = tied[Math.floor(Math.random() * tied.length)];
           } else if (candidatePool.length > 0) {
-            // No required rotation has capacity this month; assign from pool so the month isn't wasted.
-            // The resident can still pick up their remaining required rotations in later months.
-            chosenRotation = candidatePool[Math.floor(Math.random() * candidatePool.length)];
+            const notOverfilled = candidatePool.filter((r) => {
+              const init = initialRequired.get(reqKey(resident.id, r.id)) ?? 0;
+              const rem = required.get(reqKey(resident.id, r.id)) ?? 0;
+              return init === 0 || rem > 0;
+            });
+            const pool = notOverfilled.length > 0 ? notOverfilled : candidatePool;
+            chosenRotation = pool[Math.floor(Math.random() * pool.length)];
           }
         }
       }
