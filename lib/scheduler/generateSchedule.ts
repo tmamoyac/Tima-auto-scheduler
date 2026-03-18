@@ -1125,6 +1125,7 @@ async function persistSchedule({
     // Use America/Los_Angeles so the timestamp shows PST or PDT appropriately.
     const parts = new Intl.DateTimeFormat("en-US", {
       timeZone: "America/Los_Angeles",
+      timeZoneName: "short",
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -1142,7 +1143,8 @@ async function persistSchedule({
     // MM/DD/YYYY HH:mm:ss -> convert to YYYY-MM-DD HH:mm:ss for stable sorting.
     const date = `${map.year}-${map.month}-${map.day}`;
     const time = `${map.hour}:${map.minute}:${map.second}`;
-    return `${date} ${time}`;
+    const tz = map.timeZoneName ?? "PT";
+    return `${date} ${time} ${tz}`;
   };
 
   const versionName = `Generated ${formatPacific(new Date())} (attempt ${
