@@ -543,8 +543,9 @@ export async function generateSchedule({
               const rem = required.get(reqKey(resident.id, r.id)) ?? 0;
               return init === undefined || rem > 0;
             });
-            const pool = notOverfilled.length > 0 ? notOverfilled : candidatePool;
-            chosenRotation = pool[Math.floor(Math.random() * pool.length)];
+            if (notOverfilled.length > 0) {
+              chosenRotation = notOverfilled[Math.floor(Math.random() * notOverfilled.length)];
+            }
           }
         }
       }
