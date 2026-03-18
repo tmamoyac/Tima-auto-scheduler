@@ -1192,6 +1192,8 @@ export async function generateSchedule({
     | {
         assignmentRows: { resident_id: string; month_id: string; rotation_id: string | null }[];
         audit: ScheduleAudit;
+        attempt: number;
+        seed: number;
       }
     | null = null;
   let bestSoft = Infinity;
@@ -1240,7 +1242,7 @@ export async function generateSchedule({
     // We'll use this as the fallback if strict back-to-back constraints are infeasible.
     if (softCount < bestSoft) {
       bestSoft = softCount;
-      bestHard = { assignmentRows, audit };
+      bestHard = { assignmentRows, audit, attempt, seed };
     }
   }
 
@@ -1249,8 +1251,8 @@ export async function generateSchedule({
     const scheduleVersionId = await persistSchedule({
       supabaseAdmin,
       academicYearId,
-      seed: (baseSeed + maxAttempts) >>> 0,
-      attempt: maxAttempts - 1,
+      seed: bestHard.seed,
+      attempt: bestHard.attempt,
       assignmentRows: bestHard.assignmentRows,
     });
     return { scheduleVersionId, audit: bestHard.audit };
