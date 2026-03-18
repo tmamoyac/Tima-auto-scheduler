@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-type Resident = { id: string; program_id: string; pgy: number; is_active: boolean };
+type Resident = { id: string; program_id: string; pgy: number; is_active: boolean; first_name?: string; last_name?: string };
 type Month = {
   id: string;
   academic_year_id: string;
@@ -11,6 +11,7 @@ type Month = {
 type Rotation = {
   id: string;
   program_id: string;
+  name?: string;
   capacity_per_month: number;
   eligible_pgy_min: number;
   eligible_pgy_max: number;
@@ -43,13 +44,27 @@ function residentMonthKey(residentId: string, monthId: string): string {
   return `${residentId}_${monthId}`;
 }
 
+export type ScheduleAudit = {
+  requirementViolations: {
+    residentName: string;
+    rotationName: string;
+    required: number;
+    assigned: number;
+  }[];
+  softRuleViolations: {
+    residentName: string;
+    monthLabel: string;
+    rule: string;
+  }[];
+};
+
 export async function generateSchedule({
   supabaseAdmin,
   academicYearId,
 }: {
   supabaseAdmin: SupabaseClient;
   academicYearId: string;
-}): Promise<{ scheduleVersionId: string }> {
+}): Promise<{ scheduleVersionId: string; audit: ScheduleAudit }> {
   // 1) Resolve program from academic year
   const { data: academicYear, error: ayErr } = await supabaseAdmin
     .from("academic_years")
@@ -74,7 +89,7 @@ export async function generateSchedule({
 
   const { data: residents, error: residentsErr } = await supabaseAdmin
     .from("residents")
-    .select("id, program_id, pgy, is_active")
+    .select("id, program_id, pgy, is_active, first_name, last_name")
     .eq("program_id", programId)
     .eq("is_active", true);
 
@@ -83,7 +98,7 @@ export async function generateSchedule({
 
   const { data: rotations, error: rotationsErr } = await supabaseAdmin
     .from("rotations")
-    .select("id, program_id, capacity_per_month, eligible_pgy_min, eligible_pgy_max, is_consult, is_transplant, is_primary_site")
+    .select("id, program_id, name, capacity_per_month, eligible_pgy_min, eligible_pgy_max, is_consult, is_transplant, is_primary_site")
     .eq("program_id", programId);
 
   if (rotationsErr) throw rotationsErr;
@@ -293,6 +308,7 @@ export async function generateSchedule({
       }
       return false;
     };
+
     const shuffledResidents = shuffle(residentsList);
 
     const prevMonthAssignments = new Map<string, string>();
@@ -391,6 +407,7 @@ export async function generateSchedule({
       if (capLeft <= 0) continue;
 
       const candidates: Resident[] = [];
+      const hasBackToBackConflict = new Set<string>();
       for (const res of residentsList) {
         if (scheduledThisMonth.has(res.id)) continue;
         const onVacation = vacationSet.has(residentMonthKey(res.id, month.id));
@@ -407,19 +424,11 @@ export async function generateSchedule({
         }
         if (onVacation && noConsultWhenVacationInMonth && consultRotationIds.has(rot.id)) continue;
         const prevRotId = prevMonthAssignments.get(res.id);
-        const hadConsultLastMonth =
-          avoidBackToBackConsult && prevRotId != null && consultRotationIds.has(prevRotId);
-        if (hadConsultLastMonth && consultRotationIds.has(rot.id) && residentHasNonConsultNeedWithCapacity(res)) {
-          continue;
-        }
-        const hadTransplantLastMonth =
-          avoidBackToBackTransplant && prevRotId != null && transplantRotationIds.has(prevRotId);
         if (
-          hadTransplantLastMonth &&
-          transplantRotationIds.has(rot.id) &&
-          residentHasNonTransplantNeedWithCapacity(res)
+          (avoidBackToBackConsult && prevRotId != null && consultRotationIds.has(prevRotId) && consultRotationIds.has(rot.id)) ||
+          (avoidBackToBackTransplant && prevRotId != null && transplantRotationIds.has(prevRotId) && transplantRotationIds.has(rot.id))
         ) {
-          continue;
+          hasBackToBackConflict.add(res.id);
         }
         candidates.push(res);
       }
@@ -433,6 +442,11 @@ export async function generateSchedule({
       const tiers = [...byNeed.keys()].sort((a, b) => b - a);
       for (const n of tiers) {
         const group = shuffle(byNeed.get(n)!);
+        group.sort((a, b) => {
+          const ac = hasBackToBackConflict.has(a.id) ? 1 : 0;
+          const bc = hasBackToBackConflict.has(b.id) ? 1 : 0;
+          return ac - bc;
+        });
         for (const res of group) {
           if (capLeft <= 0) break;
           if (scheduledThisMonth.has(res.id)) continue;
@@ -568,10 +582,168 @@ export async function generateSchedule({
     }
   }
 
+  // ---- REPAIR PASS: fill unmet requirements ----
+  const assignmentIndexMap = new Map<string, number>();
+  for (let i = 0; i < assignmentRows.length; i++) {
+    assignmentIndexMap.set(
+      residentMonthKey(assignmentRows[i].resident_id, assignmentRows[i].month_id),
+      i
+    );
+  }
+
+  // Phase A: fill unassigned months with needed rotations (ignoring soft rules)
+  for (const resident of residentsList) {
+    const shortfalls: { rotation: Rotation; remaining: number }[] = [];
+    for (const rot of rotationsList) {
+      const rem = required.get(reqKey(resident.id, rot.id)) ?? 0;
+      if (rem > 0) shortfalls.push({ rotation: rot, remaining: rem });
+    }
+    shortfalls.sort((a, b) => b.remaining - a.remaining);
+
+    for (const { rotation: rot } of shortfalls) {
+      for (const month of monthsList) {
+        if ((required.get(reqKey(resident.id, rot.id)) ?? 0) <= 0) break;
+        const idx = assignmentIndexMap.get(residentMonthKey(resident.id, month.id));
+        if (idx === undefined) continue;
+        if (assignmentRows[idx].rotation_id !== null) continue;
+
+        const ck = capKey(month.id, rot.id);
+        if ((capacity.get(ck) ?? 0) <= 0) continue;
+        if (resident.pgy < rot.eligible_pgy_min || resident.pgy > rot.eligible_pgy_max) continue;
+
+        const onVac = vacationSet.has(residentMonthKey(resident.id, month.id));
+        if (onVac && noConsultWhenVacationInMonth && consultRotationIds.has(rot.id)) continue;
+
+        assignmentRows[idx].rotation_id = rot.id;
+        capacity.set(ck, (capacity.get(ck) ?? 0) - 1);
+        const rk = reqKey(resident.id, rot.id);
+        required.set(rk, (required.get(rk) ?? 0) - 1);
+      }
+    }
+  }
+
+  // Phase B: swap over-assigned rotations for under-assigned needed ones
+  for (const resident of residentsList) {
+    for (const rot of rotationsList) {
+      if ((required.get(reqKey(resident.id, rot.id)) ?? 0) <= 0) continue;
+      if (resident.pgy < rot.eligible_pgy_min || resident.pgy > rot.eligible_pgy_max) continue;
+
+      for (const month of monthsList) {
+        if ((required.get(reqKey(resident.id, rot.id)) ?? 0) <= 0) break;
+        const idx = assignmentIndexMap.get(residentMonthKey(resident.id, month.id));
+        if (idx === undefined) continue;
+        const currentRotId = assignmentRows[idx].rotation_id;
+        if (currentRotId === null || currentRotId === rot.id) continue;
+
+        const currentInit = initialRequired.get(reqKey(resident.id, currentRotId)) ?? 0;
+        let currentCount = 0;
+        for (const row of assignmentRows) {
+          if (row.resident_id === resident.id && row.rotation_id === currentRotId) currentCount++;
+        }
+        if (currentCount <= currentInit) continue;
+
+        const ck = capKey(month.id, rot.id);
+        if ((capacity.get(ck) ?? 0) <= 0) continue;
+
+        const onVac = vacationSet.has(residentMonthKey(resident.id, month.id));
+        if (onVac && noConsultWhenVacationInMonth && consultRotationIds.has(rot.id)) continue;
+
+        const oldCk = capKey(month.id, currentRotId);
+        capacity.set(oldCk, (capacity.get(oldCk) ?? 0) + 1);
+        capacity.set(ck, (capacity.get(ck) ?? 0) - 1);
+        required.set(reqKey(resident.id, rot.id), (required.get(reqKey(resident.id, rot.id)) ?? 0) - 1);
+        assignmentRows[idx].rotation_id = rot.id;
+      }
+    }
+  }
+
   if (assignmentRows.length > 0) {
     const { error: assignErr } = await supabaseAdmin.from("assignments").insert(assignmentRows);
     if (assignErr) throw assignErr;
   }
 
-  return { scheduleVersionId };
+  // Post-generation audit
+  const audit: ScheduleAudit = { requirementViolations: [], softRuleViolations: [] };
+
+  const assignedCount = new Map<string, number>();
+  for (const row of assignmentRows) {
+    if (!row.rotation_id) continue;
+    const key = reqKey(row.resident_id, row.rotation_id);
+    assignedCount.set(key, (assignedCount.get(key) ?? 0) + 1);
+  }
+
+  for (const res of residentsList) {
+    for (const rot of rotationsList) {
+      const init = initialRequired.get(reqKey(res.id, rot.id));
+      if (init === undefined) continue;
+      const assigned = assignedCount.get(reqKey(res.id, rot.id)) ?? 0;
+      if (assigned !== init) {
+        audit.requirementViolations.push({
+          residentName: `${res.first_name ?? ""} ${res.last_name ?? ""}`.trim(),
+          rotationName: rot.name ?? rot.id,
+          required: init,
+          assigned,
+        });
+      }
+    }
+  }
+
+  const monthIdToLabel = new Map<string, string>();
+  for (const m of monthsList) {
+    if (m.start_date) {
+      const d = new Date(m.start_date);
+      const mn = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      monthIdToLabel.set(m.id, `${mn[d.getUTCMonth()]} '${String(d.getUTCFullYear()).slice(-2)}`);
+    } else {
+      monthIdToLabel.set(m.id, `Month ${m.month_index + 1}`);
+    }
+  }
+
+  const assignmentLookup = new Map<string, string | null>();
+  for (const row of assignmentRows) {
+    assignmentLookup.set(residentMonthKey(row.resident_id, row.month_id), row.rotation_id);
+  }
+
+  for (const res of residentsList) {
+    for (let mi = 1; mi < monthsList.length; mi++) {
+      const prevMId = monthsList[mi - 1].id;
+      const currMId = monthsList[mi].id;
+      const prevRotId = assignmentLookup.get(residentMonthKey(res.id, prevMId));
+      const currRotId = assignmentLookup.get(residentMonthKey(res.id, currMId));
+      if (!prevRotId || !currRotId) continue;
+      const resName = `${res.first_name ?? ""} ${res.last_name ?? ""}`.trim();
+      if (avoidBackToBackConsult && consultRotationIds.has(prevRotId) && consultRotationIds.has(currRotId)) {
+        const prevName = rotationById.get(prevRotId)?.name ?? "Consult";
+        const currName = rotationById.get(currRotId)?.name ?? "Consult";
+        audit.softRuleViolations.push({
+          residentName: resName,
+          monthLabel: monthIdToLabel.get(currMId) ?? "",
+          rule: `Back-to-back consult: ${prevName} → ${currName}`,
+        });
+      }
+      if (avoidBackToBackTransplant && transplantRotationIds.has(prevRotId) && transplantRotationIds.has(currRotId)) {
+        const prevName = rotationById.get(prevRotId)?.name ?? "Transplant";
+        const currName = rotationById.get(currRotId)?.name ?? "Transplant";
+        audit.softRuleViolations.push({
+          residentName: resName,
+          monthLabel: monthIdToLabel.get(currMId) ?? "",
+          rule: `Back-to-back transplant: ${prevName} → ${currName}`,
+        });
+      }
+    }
+
+    if (requirePgyStartAtPrimarySite && res.pgy === pgyStartAtPrimarySite && monthsList.length > 0) {
+      const firstMId = monthsList[0].id;
+      const firstRotId = assignmentLookup.get(residentMonthKey(res.id, firstMId));
+      if (firstRotId && !primarySiteRotationIds.has(firstRotId)) {
+        audit.softRuleViolations.push({
+          residentName: `${res.first_name ?? ""} ${res.last_name ?? ""}`.trim(),
+          monthLabel: monthIdToLabel.get(firstMId) ?? "",
+          rule: `PGY${pgyStartAtPrimarySite} not starting at primary site (assigned ${rotationById.get(firstRotId)?.name ?? firstRotId})`,
+        });
+      }
+    }
+  }
+
+  return { scheduleVersionId, audit };
 }
