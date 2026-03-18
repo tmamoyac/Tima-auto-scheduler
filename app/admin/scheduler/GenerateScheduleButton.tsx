@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/apiFetch";
 import type { ScheduleAudit } from "@/lib/scheduler/generateSchedule";
 
@@ -8,6 +8,41 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [audit, setAudit] = useState<ScheduleAudit | null>(null);
+
+  // Preserve the audit panel across reloads so the schedule-version dropdown
+  // updates immediately after generation (even when there are warnings).
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("scheduleAuditReport");
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { programId: string; audit: ScheduleAudit; ts: number };
+      if (!parsed || parsed.programId !== programId) return;
+
+      const ageMs = Date.now() - (parsed.ts ?? 0);
+      if (ageMs > 5 * 60 * 1000) return;
+
+      setAudit(parsed.audit);
+
+      const reqViol = parsed.audit.requirementViolations.length;
+      const softViol = parsed.audit.softRuleViolations.length;
+      if (reqViol > 0) {
+        setMessage({ type: "error", text: "Hard requirements were not met (unexpected)." });
+      } else if (softViol > 5) {
+        setMessage({
+          type: "success",
+          text: "Schedule created: hard requirements met, but soft-rule threshold of 5 could not be reached.",
+        });
+      } else if (softViol > 0) {
+        setMessage({ type: "success", text: "Schedule created with soft-rule warnings (see below)." });
+      } else {
+        setMessage({ type: "success", text: "Schedule created! All requirements met." });
+      }
+
+      sessionStorage.removeItem("scheduleAuditReport");
+    } catch {
+      // ignore
+    }
+  }, [programId]);
 
   const handleClick = async () => {
     setLoading(true);
@@ -61,14 +96,35 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
         setAudit(a);
         setMessage({
           type: "success",
-          text: "Schedule created: hard requirements met, but soft-rule threshold of 5 could not be reached.",
+          text: "Schedule created: hard requirements met, but soft-rule threshold of 5 could not be reached. Reloading…",
         });
+        try {
+          sessionStorage.setItem(
+            "scheduleAuditReport",
+            JSON.stringify({ programId, audit: a, ts: Date.now() })
+          );
+        } catch {
+          // ignore
+        }
+        window.location.reload();
         return;
       }
 
       if (softViol > 0) {
         setAudit(a);
-        setMessage({ type: "success", text: "Schedule created with soft-rule warnings (see below)." });
+        setMessage({
+          type: "success",
+          text: "Schedule created with soft-rule warnings (see below). Reloading…",
+        });
+        try {
+          sessionStorage.setItem(
+            "scheduleAuditReport",
+            JSON.stringify({ programId, audit: a, ts: Date.now() })
+          );
+        } catch {
+          // ignore
+        }
+        window.location.reload();
         return;
       }
 
