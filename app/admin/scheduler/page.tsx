@@ -110,7 +110,7 @@ async function getScheduleVersions(supabase: SupabaseClient, academicYearId: str
     .from("schedule_versions")
     .select("id, version_name, is_final, created_at")
     .eq("academic_year_id", academicYearId)
-    .order("version_name", { ascending: false, nullsFirst: false });
+    .order("created_at", { ascending: false });
   if (error) throw error;
   return (data ?? []) as { id: string; version_name: string | null; is_final: boolean; created_at: string }[];
 }

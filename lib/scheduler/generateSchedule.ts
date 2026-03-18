@@ -70,35 +70,47 @@ export type ScheduleAudit = {
   }[];
 };
 
-async function buildScheduleVariation({
+type LoadedSchedulerStaticData = {
+  monthsList: Month[];
+  residentsList: Resident[];
+  rotationsList: Rotation[];
+  avoidBackToBackConsult: boolean;
+  noConsultWhenVacationInMonth: boolean;
+  avoidBackToBackTransplant: boolean;
+  requirePgyStartAtPrimarySite: boolean;
+  pgyStartAtPrimarySite: number;
+  vacationRanges: VacationRange[];
+  fixedRuleMap: Map<string, string>;
+  requirementsList: Requirement[];
+  residentReqByResident: Map<string, { rotation_id: string; min_months_required: number }[]>;
+};
+
+async function loadSchedulerStaticData({
   supabaseAdmin,
   academicYearId,
-  seed,
 }: {
   supabaseAdmin: SupabaseClient;
   academicYearId: string;
-  seed: number;
-}): Promise<{ assignmentRows: { resident_id: string; month_id: string; rotation_id: string | null }[]; audit: ScheduleAudit }> {
-  const rng = mulberry32(seed);
-  // 1) Resolve program from academic year
-  const { data: academicYear, error: ayErr } = await supabaseAdmin
+}): Promise<LoadedSchedulerStaticData> {
+  const { data: academicYearRow, error: ayErr } = await supabaseAdmin
     .from("academic_years")
-    .select("id, program_id")
+    .select("id, program_id, start_date, end_date")
     .eq("id", academicYearId)
     .single();
 
-  if (ayErr || !academicYear) {
+  if (ayErr || !academicYearRow) {
     throw new Error("Academic year not found");
   }
-  const programId = academicYear.program_id as string;
 
-  // 2) Load data
+  const programId = academicYearRow.program_id as string;
+  const yearStart = (academicYearRow as { start_date: string } | null)?.start_date ?? "";
+  const yearEnd = (academicYearRow as { end_date: string } | null)?.end_date ?? "";
+
   const { data: months, error: monthsErr } = await supabaseAdmin
     .from("months")
     .select("id, academic_year_id, month_index, start_date, end_date")
     .eq("academic_year_id", academicYearId)
     .order("month_index", { ascending: true });
-
   if (monthsErr) throw monthsErr;
   const monthsList = (months ?? []) as Month[];
 
@@ -107,31 +119,37 @@ async function buildScheduleVariation({
     .select("id, program_id, pgy, is_active, first_name, last_name")
     .eq("program_id", programId)
     .eq("is_active", true);
-
   if (residentsErr) throw residentsErr;
   const residentsList = (residents ?? []) as Resident[];
 
   const { data: rotations, error: rotationsErr } = await supabaseAdmin
     .from("rotations")
-    .select("id, program_id, name, capacity_per_month, eligible_pgy_min, eligible_pgy_max, is_consult, is_transplant, is_primary_site")
+    .select(
+      "id, program_id, name, capacity_per_month, eligible_pgy_min, eligible_pgy_max, is_consult, is_transplant, is_primary_site"
+    )
     .eq("program_id", programId);
-
   if (rotationsErr) throw rotationsErr;
   const rotationsList = (rotations ?? []) as Rotation[];
 
   const { data: programRow } = await supabaseAdmin
     .from("programs")
-    .select("avoid_back_to_back_consult, no_consult_when_vacation_in_month, avoid_back_to_back_transplant, prefer_primary_site_for_long_vacation, require_pgy_start_at_primary_site, pgy_start_at_primary_site")
+    .select(
+      "avoid_back_to_back_consult, no_consult_when_vacation_in_month, avoid_back_to_back_transplant, prefer_primary_site_for_long_vacation, require_pgy_start_at_primary_site, pgy_start_at_primary_site"
+    )
     .eq("id", programId)
     .single();
-  const program = programRow as {
-    avoid_back_to_back_consult?: boolean;
-    no_consult_when_vacation_in_month?: boolean;
-    avoid_back_to_back_transplant?: boolean;
-    prefer_primary_site_for_long_vacation?: boolean;
-    require_pgy_start_at_primary_site?: boolean;
-    pgy_start_at_primary_site?: number | null;
-  } | null;
+
+  const program = programRow as
+    | {
+        avoid_back_to_back_consult?: boolean;
+        no_consult_when_vacation_in_month?: boolean;
+        avoid_back_to_back_transplant?: boolean;
+        prefer_primary_site_for_long_vacation?: boolean;
+        require_pgy_start_at_primary_site?: boolean;
+        pgy_start_at_primary_site?: number | null;
+      }
+    | null;
+
   const avoidBackToBackConsult = program?.avoid_back_to_back_consult === true;
   const noConsultWhenVacationInMonth = program?.no_consult_when_vacation_in_month === true;
   const avoidBackToBackTransplant = program?.avoid_back_to_back_transplant === true;
@@ -139,46 +157,18 @@ async function buildScheduleVariation({
   const pgyStartAtPrimarySite =
     typeof program?.pgy_start_at_primary_site === "number" ? program.pgy_start_at_primary_site : 4;
 
-  const consultRotationIds = new Set<string>();
-  const transplantRotationIds = new Set<string>();
-  const primarySiteRotationIds = new Set<string>();
-  for (const rot of rotationsList) {
-    if ((rot as Rotation & { is_consult?: boolean }).is_consult) consultRotationIds.add(rot.id);
-    if ((rot as Rotation & { is_transplant?: boolean }).is_transplant) transplantRotationIds.add(rot.id);
-    if ((rot as Rotation & { is_primary_site?: boolean }).is_primary_site) primarySiteRotationIds.add(rot.id);
-  }
-
-  const { data: yearRow } = await supabaseAdmin
-    .from("academic_years")
-    .select("start_date, end_date")
-    .eq("id", academicYearId)
-    .single();
-  const yearStart = (yearRow as { start_date: string } | null)?.start_date ?? "";
-  const yearEnd = (yearRow as { end_date: string } | null)?.end_date ?? "";
   const { data: vacationRows } = await supabaseAdmin
     .from("vacation_requests")
     .select("resident_id, start_date, end_date")
     .lte("start_date", yearEnd)
     .gte("end_date", yearStart);
   const vacationRanges = (vacationRows ?? []) as VacationRange[];
-  const vacationSet = new Set<string>();
-  for (const month of monthsList) {
-    const mStart = month.start_date ?? "";
-    const mEnd = month.end_date ?? "";
-    if (!mStart || !mEnd) continue;
-    for (const resident of residentsList) {
-      const hasOverlap = vacationRanges.some(
-        (v) =>
-          v.resident_id === resident.id && v.start_date <= mEnd && v.end_date >= mStart
-      );
-      if (hasOverlap) vacationSet.add(residentMonthKey(resident.id, month.id));
-    }
-  }
 
   const { data: fixedRulesRows } = await supabaseAdmin
     .from("fixed_assignment_rules")
     .select("resident_id, month_id, rotation_id")
     .eq("academic_year_id", academicYearId);
+
   const fixedRulesList = (fixedRulesRows ?? []) as FixedRule[];
   const fixedRuleMap = new Map<string, string>();
   for (const r of fixedRulesList) {
@@ -189,7 +179,6 @@ async function buildScheduleVariation({
     .from("rotation_requirements")
     .select("pgy, rotation_id, min_months_required")
     .eq("program_id", programId);
-
   if (reqErr) throw reqErr;
   const requirementsList = (requirements ?? []) as Requirement[];
 
@@ -200,13 +189,85 @@ async function buildScheduleVariation({
           .from("resident_rotation_requirements")
           .select("resident_id, rotation_id, min_months_required")
           .in("resident_id", residentIds)
-      : { data: [] as { resident_id: string; rotation_id: string; min_months_required: number }[] };
+      : {
+          data: [] as { resident_id: string; rotation_id: string; min_months_required: number }[],
+        };
 
-  const residentReqByResident = new Map<string, { rotation_id: string; min_months_required: number }[]>();
+  const residentReqByResident = new Map<
+    string,
+    { rotation_id: string; min_months_required: number }[]
+  >();
   for (const row of residentReqRows ?? []) {
     const rid = (row as { resident_id: string }).resident_id;
     if (!residentReqByResident.has(rid)) residentReqByResident.set(rid, []);
-    residentReqByResident.get(rid)!.push(row as { rotation_id: string; min_months_required: number });
+    residentReqByResident
+      .get(rid)!
+      .push(row as { rotation_id: string; min_months_required: number });
+  }
+
+  return {
+    monthsList,
+    residentsList,
+    rotationsList,
+    avoidBackToBackConsult,
+    noConsultWhenVacationInMonth,
+    avoidBackToBackTransplant,
+    requirePgyStartAtPrimarySite,
+    pgyStartAtPrimarySite,
+    vacationRanges,
+    fixedRuleMap,
+    requirementsList,
+    residentReqByResident,
+  };
+}
+
+async function buildScheduleVariation({
+  staticData,
+  seed,
+}: {
+  staticData: LoadedSchedulerStaticData;
+  seed: number;
+}): Promise<{
+  assignmentRows: { resident_id: string; month_id: string; rotation_id: string | null }[];
+  audit: ScheduleAudit;
+}> {
+  const rng = mulberry32(seed);
+
+  const {
+    monthsList,
+    residentsList,
+    rotationsList,
+    avoidBackToBackConsult,
+    noConsultWhenVacationInMonth,
+    avoidBackToBackTransplant,
+    requirePgyStartAtPrimarySite,
+    pgyStartAtPrimarySite,
+    vacationRanges,
+    fixedRuleMap,
+    requirementsList,
+    residentReqByResident,
+  } = staticData;
+
+  const consultRotationIds = new Set<string>();
+  const transplantRotationIds = new Set<string>();
+  const primarySiteRotationIds = new Set<string>();
+  for (const rot of rotationsList) {
+    if ((rot as Rotation & { is_consult?: boolean }).is_consult) consultRotationIds.add(rot.id);
+    if ((rot as Rotation & { is_transplant?: boolean }).is_transplant) transplantRotationIds.add(rot.id);
+    if ((rot as Rotation & { is_primary_site?: boolean }).is_primary_site) primarySiteRotationIds.add(rot.id);
+  }
+
+  const vacationSet = new Set<string>();
+  for (const month of monthsList) {
+    const mStart = month.start_date ?? "";
+    const mEnd = month.end_date ?? "";
+    if (!mStart || !mEnd) continue;
+    for (const resident of residentsList) {
+      const hasOverlap = vacationRanges.some(
+        (v) => v.resident_id === resident.id && v.start_date <= mEnd && v.end_date >= mStart
+      );
+      if (hasOverlap) vacationSet.add(residentMonthKey(resident.id, month.id));
+    }
   }
 
   // 3) Build capacity: for each (month, rotation) -> capacity_per_month
@@ -1198,13 +1259,11 @@ export async function generateSchedule({
     | null = null;
   let bestSoft = Infinity;
 
+  const staticData = await loadSchedulerStaticData({ supabaseAdmin, academicYearId });
+
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const seed = (baseSeed + attempt) >>> 0;
-    const { assignmentRows, audit } = await buildScheduleVariation({
-      supabaseAdmin,
-      academicYearId,
-      seed,
-    });
+    const { assignmentRows, audit } = await buildScheduleVariation({ staticData, seed });
 
     const hardOk = audit.requirementViolations.length === 0;
     if (!hardOk) continue;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/apiFetch";
 import type { ScheduleAudit } from "@/lib/scheduler/generateSchedule";
 
@@ -8,6 +9,11 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [audit, setAudit] = useState<ScheduleAudit | null>(null);
+  const searchParams = useSearchParams();
+
+  const academicYearId =
+    searchParams.get("academicYearId") ?? searchParams.get("academicyearid") ?? "";
+  const viewParam = searchParams.get("view") ?? "";
 
   // Preserve the audit panel across reloads so the schedule-version dropdown
   // updates immediately after generation (even when there are warnings).
@@ -53,7 +59,7 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
         method: "POST",
       });
       const contentType = res.headers.get("content-type") ?? "";
-      let data: { error?: string; audit?: ScheduleAudit } = {};
+      let data: { error?: string; scheduleVersionId?: string; audit?: ScheduleAudit } = {};
       if (contentType.includes("application/json")) {
         data = await res.json();
       } else {
@@ -80,6 +86,16 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
       const a = data.audit;
       const reqViol = a?.requirementViolations.length ?? 0;
       const softViol = a?.softRuleViolations.length ?? 0;
+      const scheduleVersionId = data.scheduleVersionId;
+
+      const redirectUrl =
+        academicYearId && scheduleVersionId
+          ? `/admin/scheduler?tab=schedule&programId=${encodeURIComponent(programId)}&academicYearId=${encodeURIComponent(
+              academicYearId
+            )}${viewParam ? `&view=${encodeURIComponent(viewParam)}` : ""}&versionId=${encodeURIComponent(
+              scheduleVersionId
+            )}`
+          : null;
 
       if (!a) {
         setMessage({ type: "error", text: "Schedule generation returned no audit data." });
@@ -106,7 +122,8 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
         } catch {
           // ignore
         }
-        window.location.reload();
+        if (redirectUrl) window.location.assign(redirectUrl);
+        else window.location.reload();
         return;
       }
 
@@ -124,12 +141,14 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
         } catch {
           // ignore
         }
-        window.location.reload();
+        if (redirectUrl) window.location.assign(redirectUrl);
+        else window.location.reload();
         return;
       }
 
       setMessage({ type: "success", text: "Schedule created! All requirements met. Refreshing…" });
-      window.location.reload();
+      if (redirectUrl) window.location.assign(redirectUrl);
+      else window.location.reload();
     } catch (e) {
       setMessage({ type: "error", text: e instanceof Error ? e.message : "Request failed" });
     } finally {
