@@ -24,6 +24,12 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     const res = directorAuthErrorResponse(err);
     if (res) return jsonError(res.error, res.status);
+    if (err instanceof Error && err.message === "SCHEDULE_CONSTRAINTS_UNSATISFIABLE") {
+      return jsonError(
+        "Unable to generate a schedule that satisfies all rotation requirements within the attempt limit.",
+        422
+      );
+    }
     return jsonError(
       err instanceof Error ? err.message : "Schedule generation failed",
       500

@@ -23,10 +23,22 @@ type Requirement = { pgy: number; rotation_id: string; min_months_required: numb
 type VacationRange = { resident_id: string; start_date: string; end_date: string };
 type FixedRule = { resident_id: string; month_id: string; rotation_id: string };
 
-function shuffle<T>(array: T[]): T[] {
+function mulberry32(seed: number): () => number {
+  // Deterministic PRNG for schedule generation attempts.
+  let a = seed >>> 0;
+  return () => {
+    a += 0x6d2b79f5;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shuffle<T>(array: T[], rng: () => number): T[] {
   const out = [...array];
   for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rng() * (i + 1));
     [out[i], out[j]] = [out[j], out[i]];
   }
   return out;
@@ -58,13 +70,16 @@ export type ScheduleAudit = {
   }[];
 };
 
-export async function generateSchedule({
+async function buildScheduleVariation({
   supabaseAdmin,
   academicYearId,
+  seed,
 }: {
   supabaseAdmin: SupabaseClient;
   academicYearId: string;
-}): Promise<{ scheduleVersionId: string; audit: ScheduleAudit }> {
+  seed: number;
+}): Promise<{ assignmentRows: { resident_id: string; month_id: string; rotation_id: string | null }[]; audit: ScheduleAudit }> {
+  const rng = mulberry32(seed);
   // 1) Resolve program from academic year
   const { data: academicYear, error: ayErr } = await supabaseAdmin
     .from("academic_years")
@@ -233,27 +248,8 @@ export async function generateSchedule({
     initialReqTotalByResident.set(r.id, t);
   }
 
-  // 4) Create schedule version
-  const versionName = `Generated ${new Date().toISOString().slice(0, 19).replace("T", " ")}`;
-  const { data: versionRow, error: versionErr } = await supabaseAdmin
-    .from("schedule_versions")
-    .insert({ academic_year_id: academicYearId, version_name: versionName })
-    .select("id")
-    .single();
-
-  if (versionErr || !versionRow) {
-    const msg = versionErr?.message ?? "No row returned";
-    throw new Error(`Failed to create schedule version: ${msg}`);
-  }
-  const scheduleVersionId = versionRow.id as string;
-
-  // 5) Build schedule assignments
-  const assignmentRows: {
-    schedule_version_id: string;
-    resident_id: string;
-    month_id: string;
-    rotation_id: string | null;
-  }[] = [];
+  // 4) Build schedule assignments (in-memory only)
+  const assignmentRows: { resident_id: string; month_id: string; rotation_id: string | null }[] = [];
 
   const rotationById = new Map<string, Rotation>();
   for (const rot of rotationsList) rotationById.set(rot.id, rot);
@@ -262,7 +258,6 @@ export async function generateSchedule({
 
   const applyAssignment = (residentId: string, monthId: string, rotId: string | null) => {
     assignmentRows.push({
-      schedule_version_id: scheduleVersionId,
       resident_id: residentId,
       month_id: monthId,
       rotation_id: rotId,
@@ -333,7 +328,7 @@ export async function generateSchedule({
     let madeAssignment = false;
 
     for (const { rot } of rotScarcity) {
-      for (const month of shuffle(monthsList)) {
+      for (const month of shuffle(monthsList, rng)) {
         let cap = capacity.get(capKey(month.id, rot.id)) ?? 0;
         if (cap <= 0) continue;
         const mi = monthsList.indexOf(month);
@@ -873,17 +868,18 @@ export async function generateSchedule({
     return primarySiteRotationIds.has(firstRotId) ? 0 : 1;
   };
 
-  const residentSoftScore = (resident: Resident): number => {
-    let score = pgyStartViolationCount(resident);
+  const residentPairScore = (resident: Resident): number => {
+    let score = 0;
     for (let mi = 1; mi < monthsList.length; mi++) {
       score += pairViolationCount(getRotAt(resident.id, mi - 1), getRotAt(resident.id, mi));
     }
     return score;
   };
 
-  const totalSoftScore = (): number => residentsList.reduce((sum, r) => sum + residentSoftScore(r), 0);
+  const totalPairScore = (): number => residentsList.reduce((sum, r) => sum + residentPairScore(r), 0);
 
-  let softScore = totalSoftScore();
+  // Strictly enforce back-to-back consult/transplant avoidance by driving pair score to 0.
+  let pairScore = totalPairScore();
   const MAX_SOFT_ITERS = 600;
 
   const rotAfterSwap = (resId: string, i: number, j: number, rotI: string, rotJ: string, idx: number): string | null => {
@@ -892,7 +888,7 @@ export async function generateSchedule({
     return getRotAt(resId, idx);
   };
 
-  const deltaSoftScoreForSwap = (resident: Resident, i: number, j: number): number => {
+  const deltaPairScoreForSwap = (resident: Resident, i: number, j: number): number => {
     const rotI = getRotAt(resident.id, i);
     const rotJ = getRotAt(resident.id, j);
     if (!rotI || !rotJ || rotI === rotJ) return 0;
@@ -909,15 +905,6 @@ export async function generateSchedule({
       const newCurr = rotAfterSwap(resident.id, i, j, rotI, rotJ, start + 1);
 
       delta += pairViolationCount(newPrev, newCurr) - pairViolationCount(oldPrev, oldCurr);
-    }
-
-    // PGY-start is only affected if the first month changes for this resident.
-    if (requirePgyStartAtPrimarySite && resident.pgy === pgyStartAtPrimarySite && (i === 0 || j === 0)) {
-      const oldFirst = getRotAt(resident.id, 0);
-      const newFirst = i === 0 ? rotJ : j === 0 ? rotI : oldFirst;
-      const oldP = oldFirst ? (primarySiteRotationIds.has(oldFirst) ? 0 : 1) : 0;
-      const newP = newFirst ? (primarySiteRotationIds.has(newFirst) ? 0 : 1) : 0;
-      delta += newP - oldP;
     }
 
     return delta;
@@ -949,7 +936,7 @@ export async function generateSchedule({
     return true;
   };
 
-  for (let iter = 0; iter < MAX_SOFT_ITERS && softScore > 3; iter++) {
+  for (let iter = 0; iter < MAX_SOFT_ITERS && pairScore > 0; iter++) {
     // Global greedy search: find the best improving swap anywhere that
     // touches an existing violating adjacency (or the first month if PGY-start is violated).
     let bestDelta = 0;
@@ -990,7 +977,7 @@ export async function generateSchedule({
           if ((capacity.get(capKey(monthsList[j].id, rotI)) ?? 0) < 1) continue;
           if ((capacity.get(capKey(monthsList[i].id, rotJ)) ?? 0) < 1) continue;
 
-          const delta = deltaSoftScoreForSwap(resident, i, j);
+          const delta = deltaPairScoreForSwap(resident, i, j);
           if (delta < bestDelta) {
             bestDelta = delta;
             bestSwap = { resident, i, j };
@@ -1003,12 +990,7 @@ export async function generateSchedule({
 
     const didApply = applySwap(bestSwap.resident, bestSwap.i, bestSwap.j);
     if (!didApply) break;
-    softScore += bestDelta;
-  }
-
-  if (assignmentRows.length > 0) {
-    const { error: assignErr } = await supabaseAdmin.from("assignments").insert(assignmentRows);
-    if (assignErr) throw assignErr;
+    pairScore += bestDelta;
   }
 
   // Post-generation audit
@@ -1094,5 +1076,120 @@ export async function generateSchedule({
     }
   }
 
-  return { scheduleVersionId, audit };
+  return { assignmentRows, audit };
+}
+
+function hashStringToU32(input: string): number {
+  // FNV-1a 32-bit hash.
+  let h = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+async function persistSchedule({
+  supabaseAdmin,
+  academicYearId,
+  seed,
+  attempt,
+  assignmentRows,
+}: {
+  supabaseAdmin: SupabaseClient;
+  academicYearId: string;
+  seed: number;
+  attempt: number;
+  assignmentRows: { resident_id: string; month_id: string; rotation_id: string | null }[];
+}): Promise<string> {
+  const versionName = `Generated ${new Date().toISOString().slice(0, 19).replace("T", " ")} (attempt ${
+    attempt + 1
+  }, seed ${seed})`;
+
+  const { data: versionRow, error: versionErr } = await supabaseAdmin
+    .from("schedule_versions")
+    .insert({ academic_year_id: academicYearId, version_name: versionName })
+    .select("id")
+    .single();
+
+  if (versionErr || !versionRow) {
+    const msg = versionErr?.message ?? "No row returned";
+    throw new Error(`Failed to create schedule version: ${msg}`);
+  }
+
+  const scheduleVersionId = versionRow.id as string;
+
+  if (assignmentRows.length > 0) {
+    const rowsToInsert = assignmentRows.map((r) => ({
+      schedule_version_id: scheduleVersionId,
+      resident_id: r.resident_id,
+      month_id: r.month_id,
+      rotation_id: r.rotation_id,
+    }));
+    const { error: assignErr } = await supabaseAdmin.from("assignments").insert(rowsToInsert);
+    if (assignErr) throw assignErr;
+  }
+
+  return scheduleVersionId;
+}
+
+export async function generateSchedule({
+  supabaseAdmin,
+  academicYearId,
+}: {
+  supabaseAdmin: SupabaseClient;
+  academicYearId: string;
+}): Promise<{ scheduleVersionId: string; audit: ScheduleAudit }> {
+  const maxAttempts = 25;
+  const baseSeed = (hashStringToU32(academicYearId) ^ (Date.now() >>> 0)) >>> 0;
+
+  let bestHard:
+    | {
+        assignmentRows: { resident_id: string; month_id: string; rotation_id: string | null }[];
+        audit: ScheduleAudit;
+      }
+    | null = null;
+  let bestSoft = Infinity;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const seed = (baseSeed + attempt) >>> 0;
+    const { assignmentRows, audit } = await buildScheduleVariation({
+      supabaseAdmin,
+      academicYearId,
+      seed,
+    });
+
+    const hardOk = audit.requirementViolations.length === 0;
+    if (!hardOk) continue;
+
+    const consultBackToBackViolations = audit.softRuleViolations.filter((v) =>
+      v.rule.startsWith("Back-to-back consult:")
+    ).length;
+    const transplantBackToBackViolations = audit.softRuleViolations.filter((v) =>
+      v.rule.startsWith("Back-to-back transplant:")
+    ).length;
+
+    const strictPairOk = consultBackToBackViolations === 0 && transplantBackToBackViolations === 0;
+
+    const softCount = audit.softRuleViolations.length;
+    if (strictPairOk) {
+      const scheduleVersionId = await persistSchedule({
+        supabaseAdmin,
+        academicYearId,
+        seed,
+        attempt,
+        assignmentRows,
+      });
+      return { scheduleVersionId, audit };
+    }
+
+    if (softCount < bestSoft) {
+      bestSoft = softCount;
+      bestHard = { assignmentRows, audit };
+    }
+  }
+
+  // We found hard-valid schedules, but none satisfies the strict back-to-back consult/transplant constraints.
+  if (bestHard) throw new Error("SCHEDULE_CONSTRAINTS_UNSATISFIABLE");
+  throw new Error("SCHEDULE_CONSTRAINTS_UNSATISFIABLE");
 }
