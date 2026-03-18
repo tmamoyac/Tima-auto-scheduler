@@ -696,6 +696,145 @@ export async function generateSchedule({
     runRepairPass(5);
   }
 
+  // Phase F: final hard-requirement closure (capacity-safe swaps)
+  // If we still have a small number of unmet requirements, close them by:
+  // - Directly placing needed rotations when the rotation has remaining capacity in the month, or
+  // - When a rotation's capacity is full, swapping with another resident who is currently
+  //   over-assigned for that needed rotation in the same month.
+  //
+  // Soft rules are ignored here so that hard requirements always take precedence.
+  const residentById = new Map<string, Resident>();
+  for (const r of residentsList) residentById.set(r.id, r);
+
+  const assignedCountForEnforce = new Map<string, number>();
+  for (const row of assignmentRows) {
+    if (!row.rotation_id) continue;
+    const k = reqKey(row.resident_id, row.rotation_id);
+    assignedCountForEnforce.set(k, (assignedCountForEnforce.get(k) ?? 0) + 1);
+  }
+
+  // Map monthId_rotationId -> indices of assignmentRows occupying that rotation.
+  const monthRotationToIndices = new Map<string, number[]>();
+  for (let idx = 0; idx < assignmentRows.length; idx++) {
+    const row = assignmentRows[idx];
+    if (!row.rotation_id) continue;
+    const k = capKey(row.month_id, row.rotation_id);
+    if (!monthRotationToIndices.has(k)) monthRotationToIndices.set(k, []);
+    monthRotationToIndices.get(k)!.push(idx);
+  }
+
+  const splitReqKey = (k: string): { residentId: string; rotationId: string } => {
+    const u = k.indexOf("_");
+    if (u < 0) return { residentId: k, rotationId: "" };
+    return { residentId: k.slice(0, u), rotationId: k.slice(u + 1) };
+  };
+
+  const enforceMaxIters = 5000;
+  for (let iter = 0; iter < enforceMaxIters; iter++) {
+    let deficitKey: string | null = null;
+    for (const [k, init] of initialRequired) {
+      if (init <= 0) continue;
+      const assigned = assignedCountForEnforce.get(k) ?? 0;
+      if (assigned < init) {
+        deficitKey = k;
+        break;
+      }
+    }
+    if (!deficitKey) break;
+
+    const { residentId: resId, rotationId: neededRotId } = splitReqKey(deficitKey);
+    const res = residentById.get(resId);
+    const neededRot = rotationById.get(neededRotId);
+    if (!res || !neededRot) break;
+
+    let applied = false;
+
+    for (const month of monthsList) {
+      if (res.pgy < neededRot.eligible_pgy_min || res.pgy > neededRot.eligible_pgy_max) continue;
+
+      const idxA = assignmentIndexMap.get(residentMonthKey(res.id, month.id));
+      if (idxA === undefined) continue;
+
+      const currRotIdA = assignmentRows[idxA].rotation_id;
+      if (currRotIdA === neededRot.id) continue;
+
+      // Case 1: Direct placement if capacity remains.
+      const canPlaceDirectly = (capacity.get(capKey(month.id, neededRot.id)) ?? 0) > 0;
+      if (canPlaceDirectly) {
+        if (currRotIdA) {
+          // Free currRotIdA and consume neededRot.
+          capacity.set(
+            capKey(month.id, currRotIdA),
+            (capacity.get(capKey(month.id, currRotIdA)) ?? 0) + 1
+          );
+          assignedCountForEnforce.set(
+            reqKey(res.id, currRotIdA),
+            (assignedCountForEnforce.get(reqKey(res.id, currRotIdA)) ?? 0) - 1
+          );
+        }
+
+        capacity.set(capKey(month.id, neededRot.id), (capacity.get(capKey(month.id, neededRot.id)) ?? 0) - 1);
+        assignmentRows[idxA].rotation_id = neededRot.id;
+        assignedCountForEnforce.set(
+          reqKey(res.id, neededRot.id),
+          (assignedCountForEnforce.get(reqKey(res.id, neededRot.id)) ?? 0) + 1
+        );
+        applied = true;
+        break;
+      }
+
+      // Case 2: Capacity is full -> swap within the same month with an over-assigned resident B.
+      const candidatesB = monthRotationToIndices.get(capKey(month.id, neededRot.id)) ?? [];
+      if (candidatesB.length === 0) continue;
+
+      for (const idxB of candidatesB) {
+        const rowB = assignmentRows[idxB];
+        if (rowB.resident_id === res.id) continue;
+        const bNeedKey = reqKey(rowB.resident_id, neededRot.id);
+        const bInit = initialRequired.get(bNeedKey) ?? 0;
+        const bAssigned = assignedCountForEnforce.get(bNeedKey) ?? 0;
+        if (bAssigned <= bInit) continue; // B is not over-assigned; don't steal from them.
+
+        // B will take A's current rotation (or become null).
+        if (currRotIdA) {
+          const bRes = residentById.get(rowB.resident_id);
+          const currRotObj = rotationById.get(currRotIdA);
+          if (!bRes || !currRotObj) continue;
+          if (bRes.pgy < currRotObj.eligible_pgy_min || bRes.pgy > currRotObj.eligible_pgy_max) continue;
+        }
+
+        // Perform swap.
+        assignmentRows[idxA].rotation_id = neededRot.id;
+        assignmentRows[idxB].rotation_id = currRotIdA ?? null;
+
+        // Update assigned counts.
+        assignedCountForEnforce.set(deficitKey, (assignedCountForEnforce.get(deficitKey) ?? 0) + 1);
+
+        if (currRotIdA) {
+          const aOldKey = reqKey(res.id, currRotIdA);
+          assignedCountForEnforce.set(aOldKey, (assignedCountForEnforce.get(aOldKey) ?? 0) - 1);
+
+          const bNewKey = reqKey(rowB.resident_id, currRotIdA);
+          assignedCountForEnforce.set(bNewKey, (assignedCountForEnforce.get(bNewKey) ?? 0) + 1);
+        }
+
+        // B loses one neededRot.
+        assignedCountForEnforce.set(
+          reqKey(rowB.resident_id, neededRot.id),
+          (assignedCountForEnforce.get(reqKey(rowB.resident_id, neededRot.id)) ?? 0) - 1
+        );
+
+        // Capacity remains satisfied because this is a within-month swap.
+        applied = true;
+        break;
+      }
+
+      if (applied) break;
+    }
+
+    if (!applied) break;
+  }
+
   // Phase D: score-based minimizer for the soft violations we report in the audit UI.
   // This tries to reduce the global soft violation count to <= 3 while preserving per-resident
   // rotation counts (by swapping two non-null rotation slots within the same resident).
