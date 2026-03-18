@@ -217,6 +217,20 @@ export async function generateSchedule({
   const rotationById = new Map<string, Rotation>();
   for (const rot of rotationsList) rotationById.set(rot.id, rot);
 
+  /** Max/total remaining required months for a resident (updated as schedule is built). */
+  function residentRequirementUrgency(residentId: string): { maxSingle: number; total: number } {
+    let maxSingle = 0;
+    let total = 0;
+    for (const rot of rotationsList) {
+      const v = required.get(reqKey(residentId, rot.id)) ?? 0;
+      if (v > 0) {
+        total += v;
+        maxSingle = Math.max(maxSingle, v);
+      }
+    }
+    return { maxSingle, total };
+  }
+
   for (let monthIndex = 0; monthIndex < monthsList.length; monthIndex++) {
     const month = monthsList[monthIndex];
     const shuffledResidents = shuffle(residentsList);
@@ -239,16 +253,21 @@ export async function generateSchedule({
     if (avoidBackToBackTransplant && transplantRotationIds.size > 0) {
       for (const id of transplantRotationIds) avoidIds.add(id);
     }
-    const orderedResidents =
-      avoidIds.size > 0
-        ? [...shuffledResidents].sort((a, b) => {
-            const aHad = avoidIds.has(prevMonthAssignments.get(a.id) ?? "");
-            const bHad = avoidIds.has(prevMonthAssignments.get(b.id) ?? "");
-            if (aHad && !bHad) return -1;
-            if (!aHad && bHad) return 1;
-            return 0;
-          })
-        : shuffledResidents;
+    // Process residents with highest unmet requirement on any one rotation first so they
+    // claim scarce slots (e.g. 4 months UCI Orange) before others fill capacity.
+    const orderedResidents = [...shuffledResidents].sort((a, b) => {
+      if (avoidIds.size > 0) {
+        const aHad = avoidIds.has(prevMonthAssignments.get(a.id) ?? "");
+        const bHad = avoidIds.has(prevMonthAssignments.get(b.id) ?? "");
+        if (aHad && !bHad) return -1;
+        if (!aHad && bHad) return 1;
+      }
+      const ua = residentRequirementUrgency(a.id);
+      const ub = residentRequirementUrgency(b.id);
+      if (ub.maxSingle !== ua.maxSingle) return ub.maxSingle - ua.maxSingle;
+      if (ub.total !== ua.total) return ub.total - ua.total;
+      return a.id.localeCompare(b.id);
+    });
 
     for (const resident of orderedResidents) {
       const ruleRotationId = fixedRuleMap.get(residentMonthKey(resident.id, month.id));
@@ -351,7 +370,14 @@ export async function generateSchedule({
           return rem > 0;
         });
         if (requiredWithCapacity.length > 0) {
-          chosenRotation = requiredWithCapacity[Math.floor(Math.random() * requiredWithCapacity.length)];
+          let maxReq = 0;
+          for (const rot of requiredWithCapacity) {
+            maxReq = Math.max(maxReq, required.get(reqKey(resident.id, rot.id)) ?? 0);
+          }
+          const tied = requiredWithCapacity.filter(
+            (rot) => (required.get(reqKey(resident.id, rot.id)) ?? 0) === maxReq
+          );
+          chosenRotation = tied[Math.floor(Math.random() * tied.length)];
         } else if (candidatePool.length > 0) {
           chosenRotation = candidatePool[Math.floor(Math.random() * candidatePool.length)];
         }
