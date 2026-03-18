@@ -1121,7 +1121,31 @@ async function persistSchedule({
   attempt: number;
   assignmentRows: { resident_id: string; month_id: string; rotation_id: string | null }[];
 }): Promise<string> {
-  const versionName = `Generated ${new Date().toISOString().slice(0, 19).replace("T", " ")} (attempt ${
+  const formatPacific = (d: Date): string => {
+    // Use America/Los_Angeles so the timestamp shows PST or PDT appropriately.
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Los_Angeles",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).formatToParts(d);
+
+    const map: Record<string, string> = {};
+    for (const p of parts) {
+      if (p.type !== "literal") map[p.type] = p.value;
+    }
+
+    // MM/DD/YYYY HH:mm:ss -> convert to YYYY-MM-DD HH:mm:ss for stable sorting.
+    const date = `${map.year}-${map.month}-${map.day}`;
+    const time = `${map.hour}:${map.minute}:${map.second}`;
+    return `${date} ${time}`;
+  };
+
+  const versionName = `Generated ${formatPacific(new Date())} (attempt ${
     attempt + 1
   }, seed ${seed})`;
 
