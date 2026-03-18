@@ -743,7 +743,7 @@ export async function generateSchedule({
     return { residentId: k.slice(0, u), rotationId: k.slice(u + 1) };
   };
 
-  const enforceMaxIters = 5000;
+  const enforceMaxIters = 20000;
   for (let iter = 0; iter < enforceMaxIters; iter++) {
     let deficitKey: string | null = null;
     let bestGap = -Infinity;
@@ -807,9 +807,6 @@ export async function generateSchedule({
         const rowB = assignmentRows[idxB];
         if (rowB.resident_id === res.id) continue;
         const bNeedKey = reqKey(rowB.resident_id, neededRot.id);
-        const bInit = initialRequired.get(bNeedKey) ?? 0;
-        const bAssigned = assignedCountForEnforce.get(bNeedKey) ?? 0;
-        if (bAssigned <= bInit) continue; // B is not over-assigned; don't steal from them.
 
         // B will take A's current rotation (or become null).
         if (currRotIdA) {
@@ -836,8 +833,8 @@ export async function generateSchedule({
 
         // B loses one neededRot.
         assignedCountForEnforce.set(
-          reqKey(rowB.resident_id, neededRot.id),
-          (assignedCountForEnforce.get(reqKey(rowB.resident_id, neededRot.id)) ?? 0) - 1
+          bNeedKey,
+          (assignedCountForEnforce.get(bNeedKey) ?? 0) - 1
         );
 
         // Capacity remains satisfied because this is a within-month swap.
