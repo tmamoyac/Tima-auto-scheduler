@@ -703,6 +703,20 @@ export async function generateSchedule({
   //   over-assigned for that needed rotation in the same month.
   //
   // Soft rules are ignored here so that hard requirements always take precedence.
+
+  // Rebuild capacity from current `assignmentRows` to avoid any drift from prior repair phases.
+  // `capacity` in this file represents remaining capacity per (month, rotation).
+  for (const month of monthsList) {
+    for (const rot of rotationsList) {
+      capacity.set(capKey(month.id, rot.id), rot.capacity_per_month);
+    }
+  }
+  for (const row of assignmentRows) {
+    if (!row.rotation_id) continue;
+    const ck = capKey(row.month_id, row.rotation_id);
+    capacity.set(ck, (capacity.get(ck) ?? 0) - 1);
+  }
+
   const residentById = new Map<string, Resident>();
   for (const r of residentsList) residentById.set(r.id, r);
 
@@ -732,12 +746,14 @@ export async function generateSchedule({
   const enforceMaxIters = 5000;
   for (let iter = 0; iter < enforceMaxIters; iter++) {
     let deficitKey: string | null = null;
+    let bestGap = -Infinity;
     for (const [k, init] of initialRequired) {
       if (init <= 0) continue;
       const assigned = assignedCountForEnforce.get(k) ?? 0;
-      if (assigned < init) {
+      const gap = init - assigned;
+      if (gap > 0 && gap > bestGap) {
+        bestGap = gap;
         deficitKey = k;
-        break;
       }
     }
     if (!deficitKey) break;
@@ -832,7 +848,7 @@ export async function generateSchedule({
       if (applied) break;
     }
 
-    if (!applied) break;
+    if (!applied) continue;
   }
 
   // Phase D: score-based minimizer for the soft violations we report in the audit UI.
