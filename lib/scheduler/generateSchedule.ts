@@ -285,29 +285,6 @@ export async function generateSchedule({
 
   for (let monthIndex = 0; monthIndex < monthsList.length; monthIndex++) {
     const month = monthsList[monthIndex];
-    const monthId = month.id;
-
-    const residentHasNonConsultNeedWithCapacity = (res: Resident): boolean => {
-      for (const r of rotationsList) {
-        if (consultRotationIds.has(r.id)) continue;
-        if (res.pgy < r.eligible_pgy_min || res.pgy > r.eligible_pgy_max) continue;
-        if ((required.get(reqKey(res.id, r.id)) ?? 0) <= 0) continue;
-        if ((capacity.get(capKey(monthId, r.id)) ?? 0) <= 0) continue;
-        return true;
-      }
-      return false;
-    };
-
-    const residentHasNonTransplantNeedWithCapacity = (res: Resident): boolean => {
-      for (const r of rotationsList) {
-        if (transplantRotationIds.has(r.id)) continue;
-        if (res.pgy < r.eligible_pgy_min || res.pgy > r.eligible_pgy_max) continue;
-        if ((required.get(reqKey(res.id, r.id)) ?? 0) <= 0) continue;
-        if ((capacity.get(capKey(monthId, r.id)) ?? 0) <= 0) continue;
-        return true;
-      }
-      return false;
-    };
 
     const shuffledResidents = shuffle(residentsList);
 
