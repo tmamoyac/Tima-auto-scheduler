@@ -1172,7 +1172,8 @@ export async function generateSchedule({
     const strictPairOk = consultBackToBackViolations === 0 && transplantBackToBackViolations === 0;
 
     const softCount = audit.softRuleViolations.length;
-    if (strictPairOk) {
+    // Strict acceptance: strict back-to-back counts must be 0 AND total soft violations must be <= 5.
+    if (strictPairOk && softCount <= 5) {
       const scheduleVersionId = await persistSchedule({
         supabaseAdmin,
         academicYearId,
@@ -1183,23 +1184,25 @@ export async function generateSchedule({
       return { scheduleVersionId, audit };
     }
 
+    // Track the best hard-valid schedule (even if strict back-to-back is not 0).
+    // We'll use this as the fallback if strict back-to-back constraints are infeasible.
     if (softCount < bestSoft) {
       bestSoft = softCount;
       bestHard = { assignmentRows, audit };
     }
   }
 
-  // We found hard-valid schedules, but none satisfies the strict back-to-back consult/transplant constraints.
+  // Fallback: hard requirements are satisfiable, but strict back-to-back counts are not.
   if (bestHard) {
-    const consultCount = bestHard.audit.softRuleViolations.filter((v) =>
-      v.rule.startsWith("Back-to-back consult:")
-    ).length;
-    const transplantCount = bestHard.audit.softRuleViolations.filter((v) =>
-      v.rule.startsWith("Back-to-back transplant:")
-    ).length;
-    throw new Error(
-      `SCHEDULE_CONSTRAINTS_UNSATISFIABLE (best hard-valid: consult=${consultCount}, transplant=${transplantCount}, softTotal=${bestHard.audit.softRuleViolations.length})`
-    );
+    const scheduleVersionId = await persistSchedule({
+      supabaseAdmin,
+      academicYearId,
+      seed: (baseSeed + maxAttempts) >>> 0,
+      attempt: maxAttempts - 1,
+      assignmentRows: bestHard.assignmentRows,
+    });
+    return { scheduleVersionId, audit: bestHard.audit };
   }
+
   throw new Error("SCHEDULE_CONSTRAINTS_UNSATISFIABLE");
 }
