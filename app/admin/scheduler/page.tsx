@@ -201,6 +201,7 @@ export default async function SchedulerPage({
     programid?: string;
     academicYearId?: string;
     academicyearid?: string;
+    view?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -210,6 +211,8 @@ export default async function SchedulerPage({
   const academicYearIdRaw = params.academicYearId ?? params.academicyearid;
   const academicYearIdOverride =
     typeof academicYearIdRaw === "string" && academicYearIdRaw.length > 0 ? academicYearIdRaw : undefined;
+
+  const viewMode = params.view === "rotations" ? "rotations" : "residents";
   const context = await getContext(programIdOverride, academicYearIdOverride);
 
   const supabase = createSupabaseServerClient();
@@ -311,7 +314,27 @@ export default async function SchedulerPage({
     cellRotationLabel.set(key, label);
   }
 
+  const residentNameById = new Map(residents.map((r) => [r.id, `${r.first_name} ${r.last_name}`.trim()]));
+
+  const UNASSIGNED_ROTATION_KEY = "__unassigned__";
+  const rotationMonthResidentIds = new Map<string, string[]>();
+  for (const a of assignments) {
+    const rotKey = a.rotation_id ?? UNASSIGNED_ROTATION_KEY;
+    const key = `${a.month_id}_${rotKey}`;
+    const arr = rotationMonthResidentIds.get(key) ?? [];
+    arr.push(a.resident_id);
+    rotationMonthResidentIds.set(key, arr);
+  }
+
+  const rotationIdsList = Object.keys(rotationNames);
+  const showUnassignedRotationRow = assignments.some((a) => a.rotation_id === null);
+
   const selectedVersion = versions.find((v) => v.id === selectedVersionId);
+
+  const viewToggleHref =
+    viewMode === "residents"
+      ? `/admin/scheduler?tab=schedule&programId=${programId}&academicYearId=${academicYearId}${selectedVersionId ? `&versionId=${selectedVersionId}` : ""}&view=rotations`
+      : `/admin/scheduler?tab=schedule&programId=${programId}&academicYearId=${academicYearId}${selectedVersionId ? `&versionId=${selectedVersionId}` : ""}`;
 
   return (
     <Suspense fallback={<div className="p-6 text-gray-500">Loading…</div>}>
@@ -323,6 +346,11 @@ export default async function SchedulerPage({
         academicYearEnd={academicYearEnd}
         initialTab={tabParam}
         isSuperAdmin={isSuperAdmin}
+        headerRight={
+          <a href={viewToggleHref} className="text-sm text-blue-600 underline">
+            {viewMode === "residents" ? "Change view: Rotations" : "Change view: Residents"}
+          </a>
+        }
       >
       <h1 className="text-2xl font-semibold mb-4">Scheduler</h1>
       <p className="text-sm text-gray-600 mb-2">
@@ -338,62 +366,191 @@ export default async function SchedulerPage({
         Changed residents or rotations on Setup? Click <strong>Refresh</strong> below to load them here.
       </p>
       <div className="overflow-x-auto mb-6">
-        <table className="border-collapse border border-gray-300 text-sm">
-          <thead>
-            <tr>
-              <th className="border border-gray-300 bg-gray-100 px-2 py-1.5 text-left sticky left-0 z-10 min-w-[100px]">
-                Resident
-              </th>
-              {monthsTyped.map((m) => {
-                const shortLabel = m.month_label ? (m.month_label.slice(0, 3) + (m.month_label.includes("2027") ? " '27" : " '26")) : "";
-                return (
-                  <th
-                    key={m.id}
-                    className="border border-gray-300 bg-gray-100 px-1 py-1.5 text-center min-w-[64px] max-w-[80px]"
-                    title={m.month_label ?? undefined}
-                  >
-                    <span className="truncate block" title={m.month_label ?? undefined}>
-                      {shortLabel || m.month_label}
-                    </span>
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {residents.map((r) => (
-              <tr key={r.id}>
-                <td className="border border-gray-300 px-2 py-1.5 sticky left-0 bg-white z-10 font-medium min-w-[100px] text-xs">
-                  {r.first_name} {r.last_name} (PGY{r.pgy})
-                </td>
+        {viewMode === "residents" ? (
+          <table className="border-collapse border border-gray-300 text-sm">
+            <thead>
+              <tr>
+                <th className="border border-gray-300 bg-gray-100 px-2 py-1.5 text-left sticky left-0 z-10 min-w-[100px]">
+                  Resident
+                </th>
                 {monthsTyped.map((m) => {
-                  const key = `${r.id}_${m.id}`;
-                  const rotationLabel = cellRotationLabel.get(key) ?? "—";
-                  const mStart = m.start_date ?? "";
-                  const mEnd = m.end_date ?? "";
-                  const vacationLabels =
-                    mStart && mEnd
-                      ? getVacationLabelsInMonth(vacationRequests, r.id, mStart, mEnd)
-                      : [];
+                  const shortLabel = m.month_label
+                    ? m.month_label.slice(0, 3) + (m.month_label.includes("2027") ? " '27" : " '26")
+                    : "";
                   return (
-                    <td key={m.id} className="border border-gray-300 px-1 py-1.5 text-center text-gray-700 align-top min-w-[64px] max-w-[80px]">
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-xs block break-words" title={rotationLabel}>
-                          {rotationLabel}
-                        </span>
-                        {vacationLabels.length > 0 && (
-                          <span className="text-[10px] text-amber-700 block break-words" title={`Vacation: ${vacationLabels.join(", ")}`}>
-                            Vac: {vacationLabels.join(", ")}
-                          </span>
-                        )}
-                      </div>
-                    </td>
+                    <th
+                      key={m.id}
+                      className="border border-gray-300 bg-gray-100 px-1 py-1.5 text-center min-w-[64px] max-w-[80px]"
+                      title={m.month_label ?? undefined}
+                    >
+                      <span className="truncate block" title={m.month_label ?? undefined}>
+                        {shortLabel || m.month_label}
+                      </span>
+                    </th>
                   );
                 })}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {residents.map((r) => (
+                <tr key={r.id}>
+                  <td className="border border-gray-300 px-2 py-1.5 sticky left-0 bg-white z-10 font-medium min-w-[100px] text-xs">
+                    {r.first_name} {r.last_name} (PGY{r.pgy})
+                  </td>
+                  {monthsTyped.map((m) => {
+                    const key = `${r.id}_${m.id}`;
+                    const rotationLabel = cellRotationLabel.get(key) ?? "—";
+                    const mStart = m.start_date ?? "";
+                    const mEnd = m.end_date ?? "";
+                    const vacationLabels =
+                      mStart && mEnd ? getVacationLabelsInMonth(vacationRequests, r.id, mStart, mEnd) : [];
+                    return (
+                      <td
+                        key={m.id}
+                        className="border border-gray-300 px-1 py-1.5 text-center text-gray-700 align-top min-w-[64px] max-w-[80px]"
+                      >
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-xs block break-words" title={rotationLabel}>
+                            {rotationLabel}
+                          </span>
+                          {vacationLabels.length > 0 && (
+                            <span
+                              className="text-[10px] text-amber-700 block break-words"
+                              title={`Vacation: ${vacationLabels.join(", ")}`}
+                            >
+                              Vac: {vacationLabels.join(", ")}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <table className="border-collapse border border-gray-300 text-sm">
+            <thead>
+              <tr>
+                <th className="border border-gray-300 bg-gray-100 px-2 py-1.5 text-left sticky left-0 z-10 min-w-[140px]">
+                  Rotation
+                </th>
+                {monthsTyped.map((m) => {
+                  const shortLabel = m.month_label
+                    ? m.month_label.slice(0, 3) + (m.month_label.includes("2027") ? " '27" : " '26")
+                    : "";
+                  return (
+                    <th
+                      key={m.id}
+                      className="border border-gray-300 bg-gray-100 px-1 py-1.5 text-center min-w-[64px] max-w-[80px]"
+                      title={m.month_label ?? undefined}
+                    >
+                      <span className="truncate block" title={m.month_label ?? undefined}>
+                        {shortLabel || m.month_label}
+                      </span>
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {rotationIdsList.map((rotId) => {
+                return (
+                  <tr key={rotId}>
+                    <td className="border border-gray-300 px-2 py-1.5 sticky left-0 bg-white z-10 font-medium min-w-[140px] text-xs">
+                      {rotationNames[rotId] ?? rotId}
+                    </td>
+                    {monthsTyped.map((m) => {
+                      const mStart = m.start_date ?? "";
+                      const mEnd = m.end_date ?? "";
+                      const key = `${m.id}_${rotId}`;
+                      const residentIds = rotationMonthResidentIds.get(key) ?? [];
+                      const residentNames = residentIds.map((rid) => residentNameById.get(rid) ?? rid);
+
+                      const vacationLabels: string[] = [];
+                      if (mStart && mEnd && residentIds.length > 0) {
+                        const vacSet = new Set<string>();
+                        for (const rid of residentIds) {
+                          const v = getVacationLabelsInMonth(vacationRequests, rid, mStart, mEnd);
+                          for (const label of v) vacSet.add(label);
+                        }
+                        vacationLabels.push(...vacSet);
+                      }
+
+                      return (
+                        <td
+                          key={m.id}
+                          className="border border-gray-300 px-1 py-1.5 text-center text-gray-700 align-top min-w-[64px] max-w-[80px]"
+                        >
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-xs block break-words" title={residentNames.join(", ")}>
+                              {residentNames.length > 0 ? residentNames.join(", ") : "—"}
+                            </span>
+                            {vacationLabels.length > 0 && (
+                              <span
+                                className="text-[10px] text-amber-700 block break-words"
+                                title={`Vacation: ${vacationLabels.join(", ")}`}
+                              >
+                                Vac: {vacationLabels.join(", ")}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+
+              {showUnassignedRotationRow && (
+                <tr key={UNASSIGNED_ROTATION_KEY}>
+                  <td className="border border-gray-300 px-2 py-1.5 sticky left-0 bg-white z-10 font-medium min-w-[140px] text-xs">
+                    Unassigned
+                  </td>
+                  {monthsTyped.map((m) => {
+                    const mStart = m.start_date ?? "";
+                    const mEnd = m.end_date ?? "";
+                    const key = `${m.id}_${UNASSIGNED_ROTATION_KEY}`;
+                    const residentIds = rotationMonthResidentIds.get(key) ?? [];
+                    const residentNames = residentIds.map((rid) => residentNameById.get(rid) ?? rid);
+
+                    const vacationLabels: string[] = [];
+                    if (mStart && mEnd && residentIds.length > 0) {
+                      const vacSet = new Set<string>();
+                      for (const rid of residentIds) {
+                        const v = getVacationLabelsInMonth(vacationRequests, rid, mStart, mEnd);
+                        for (const label of v) vacSet.add(label);
+                      }
+                      vacationLabels.push(...vacSet);
+                    }
+
+                    return (
+                      <td
+                        key={m.id}
+                        className="border border-gray-300 px-1 py-1.5 text-center text-gray-700 align-top min-w-[64px] max-w-[80px]"
+                      >
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-xs block break-words" title={residentNames.join(", ")}>
+                            {residentNames.length > 0 ? residentNames.join(", ") : "—"}
+                          </span>
+                          {vacationLabels.length > 0 && (
+                            <span
+                              className="text-[10px] text-amber-700 block break-words"
+                              title={`Vacation: ${vacationLabels.join(", ")}`}
+                            >
+                              Vac: {vacationLabels.join(", ")}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
       <div className="flex flex-wrap items-center gap-3 p-4 border-t border-gray-200 bg-gray-50 rounded-lg">
         <GenerateScheduleButton programId={programId} />

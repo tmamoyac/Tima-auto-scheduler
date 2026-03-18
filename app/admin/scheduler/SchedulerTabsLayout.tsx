@@ -15,6 +15,7 @@ export function SchedulerTabsLayout({
   academicYearEnd,
   initialTab = "schedule",
   isSuperAdmin = false,
+  headerRight,
   children,
 }: {
   programId: string;
@@ -24,6 +25,7 @@ export function SchedulerTabsLayout({
   academicYearEnd: string;
   initialTab?: TabId;
   isSuperAdmin?: boolean;
+  headerRight?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const searchParams = useSearchParams();
@@ -60,20 +62,26 @@ export function SchedulerTabsLayout({
       />
       <div className="flex flex-col">
         <div className="max-w-7xl w-full mx-auto px-6 pt-6">
-          <div className="flex gap-1 p-1.5 rounded-xl bg-gray-200 border border-gray-200 max-w-fit">
-            {tabs.map((tab) => (
-              <a
-                key={tab.id}
-                href={tabHref(tab.id)}
-                className={`px-6 py-3 text-base font-semibold rounded-lg transition-all no-underline block ${
-                  activeTab === tab.id
-                    ? "bg-indigo-600 text-white shadow-sm"
-                    : "text-gray-700 hover:bg-gray-300 hover:text-gray-900"
-                }`}
-              >
-                {tab.label}
-              </a>
-            ))}
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex gap-1 p-1.5 rounded-xl bg-gray-200 border border-gray-200 max-w-fit">
+              {tabs.map((tab) => (
+                <a
+                  key={tab.id}
+                  href={tabHref(tab.id)}
+                  className={`px-6 py-3 text-base font-semibold rounded-lg transition-all no-underline block ${
+                    activeTab === tab.id
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "text-gray-700 hover:bg-gray-300 hover:text-gray-900"
+                  }`}
+                >
+                  {tab.label}
+                </a>
+              ))}
+            </div>
+
+            {activeTab === "schedule" && headerRight ? (
+              <div className="flex items-center">{headerRight}</div>
+            ) : null}
           </div>
         </div>
         {activeTab === "setup" && (
