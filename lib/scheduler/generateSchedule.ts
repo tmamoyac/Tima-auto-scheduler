@@ -174,6 +174,22 @@ export async function generateSchedule({
   if (reqErr) throw reqErr;
   const requirementsList = (requirements ?? []) as Requirement[];
 
+  const residentIds = residentsList.map((r) => r.id);
+  const { data: residentReqRows } =
+    residentIds.length > 0
+      ? await supabaseAdmin
+          .from("resident_rotation_requirements")
+          .select("resident_id, rotation_id, min_months_required")
+          .in("resident_id", residentIds)
+      : { data: [] as { resident_id: string; rotation_id: string; min_months_required: number }[] };
+
+  const residentReqByResident = new Map<string, { rotation_id: string; min_months_required: number }[]>();
+  for (const row of residentReqRows ?? []) {
+    const rid = (row as { resident_id: string }).resident_id;
+    if (!residentReqByResident.has(rid)) residentReqByResident.set(rid, []);
+    residentReqByResident.get(rid)!.push(row as { rotation_id: string; min_months_required: number });
+  }
+
   // 3) Build capacity: for each (month, rotation) -> capacity_per_month
   const capacity = new Map<string, number>();
   for (const month of monthsList) {
@@ -182,14 +198,32 @@ export async function generateSchedule({
     }
   }
 
-  // Required: residentId_rotationId -> remaining months needed (from resident's PGY)
+  // Required: residentId_rotationId -> remaining months (per-resident table if any rows exist, else PGY matrix)
   const required = new Map<string, number>();
   for (const r of residentsList) {
-    for (const req of requirementsList) {
-      if (req.pgy !== r.pgy) continue;
-      const key = reqKey(r.id, req.rotation_id);
-      required.set(key, req.min_months_required);
+    const custom = residentReqByResident.get(r.id);
+    if (custom && custom.length > 0) {
+      for (const rot of rotationsList) {
+        required.set(reqKey(r.id, rot.id), 0);
+      }
+      for (const row of custom) {
+        required.set(reqKey(r.id, row.rotation_id), row.min_months_required);
+      }
+    } else {
+      for (const req of requirementsList) {
+        if (req.pgy !== r.pgy) continue;
+        required.set(reqKey(r.id, req.rotation_id), req.min_months_required);
+      }
     }
+  }
+
+  const initialReqTotalByResident = new Map<string, number>();
+  for (const r of residentsList) {
+    let t = 0;
+    for (const rot of rotationsList) {
+      t += required.get(reqKey(r.id, rot.id)) ?? 0;
+    }
+    initialReqTotalByResident.set(r.id, t);
   }
 
   // 4) Create schedule version (version_name is sortable so "latest" query can use it)
@@ -233,6 +267,29 @@ export async function generateSchedule({
 
   for (let monthIndex = 0; monthIndex < monthsList.length; monthIndex++) {
     const month = monthsList[monthIndex];
+    const monthId = month.id;
+
+    const residentHasNonConsultNeedWithCapacity = (res: Resident): boolean => {
+      for (const r of rotationsList) {
+        if (consultRotationIds.has(r.id)) continue;
+        if (res.pgy < r.eligible_pgy_min || res.pgy > r.eligible_pgy_max) continue;
+        if ((required.get(reqKey(res.id, r.id)) ?? 0) <= 0) continue;
+        if ((capacity.get(capKey(monthId, r.id)) ?? 0) <= 0) continue;
+        return true;
+      }
+      return false;
+    };
+
+    const residentHasNonTransplantNeedWithCapacity = (res: Resident): boolean => {
+      for (const r of rotationsList) {
+        if (transplantRotationIds.has(r.id)) continue;
+        if (res.pgy < r.eligible_pgy_min || res.pgy > r.eligible_pgy_max) continue;
+        if ((required.get(reqKey(res.id, r.id)) ?? 0) <= 0) continue;
+        if ((capacity.get(capKey(monthId, r.id)) ?? 0) <= 0) continue;
+        return true;
+      }
+      return false;
+    };
     const shuffledResidents = shuffle(residentsList);
 
     const prevMonthAssignments = new Map<string, string>();
@@ -244,8 +301,6 @@ export async function generateSchedule({
       }
     }
 
-    // When avoiding back-to-back consult/transplant, process residents who had it last month first
-    // so they get first pick of non-consult/non-transplant slots.
     const avoidIds = new Set<string>();
     if (avoidBackToBackConsult && consultRotationIds.size > 0) {
       for (const id of consultRotationIds) avoidIds.add(id);
@@ -253,8 +308,6 @@ export async function generateSchedule({
     if (avoidBackToBackTransplant && transplantRotationIds.size > 0) {
       for (const id of transplantRotationIds) avoidIds.add(id);
     }
-    // Process residents with highest unmet requirement on any one rotation first so they
-    // claim scarce slots (e.g. 4 months UCI Orange) before others fill capacity.
     const orderedResidents = [...shuffledResidents].sort((a, b) => {
       if (avoidIds.size > 0) {
         const aHad = avoidIds.has(prevMonthAssignments.get(a.id) ?? "");
@@ -269,13 +322,25 @@ export async function generateSchedule({
       return a.id.localeCompare(b.id);
     });
 
-    for (const resident of orderedResidents) {
-      const ruleRotationId = fixedRuleMap.get(residentMonthKey(resident.id, month.id));
+    const scheduledThisMonth = new Set<string>();
+
+    const applyAssignment = (residentId: string, rot: Rotation) => {
+      const capKeyVal = capKey(month.id, rot.id);
+      capacity.set(capKeyVal, (capacity.get(capKeyVal) ?? 0) - 1);
+      const reqKeyVal = reqKey(residentId, rot.id);
+      const rem = required.get(reqKeyVal) ?? 0;
+      if (rem > 0) required.set(reqKeyVal, rem - 1);
+      scheduledThisMonth.add(residentId);
+      assignmentRows.push({
+        schedule_version_id: scheduleVersionId,
+        resident_id: residentId,
+        month_id: month.id,
+        rotation_id: rot.id,
+      });
+    };
+
+    for (const resident of residentsList) {
       const onVacation = vacationSet.has(residentMonthKey(resident.id, month.id));
-
-      let chosenRotation: Rotation | null = null;
-
-      // When preference is OFF: vacation months stay unassigned (current behavior).
       if (onVacation && !noConsultWhenVacationInMonth) {
         assignmentRows.push({
           schedule_version_id: scheduleVersionId,
@@ -283,103 +348,195 @@ export async function generateSchedule({
           month_id: month.id,
           rotation_id: null,
         });
-        continue;
+        scheduledThisMonth.add(resident.id);
       }
+    }
 
-      if (ruleRotationId) {
-        if (!onVacation) {
-          const ruleRotation = rotationById.get(ruleRotationId);
-          if (ruleRotation) {
-            const rem = capacity.get(capKey(month.id, ruleRotation.id)) ?? 0;
-            const isFirstMonthPgyMustBePrimary =
-              monthIndex === 0 &&
-              requirePgyStartAtPrimarySite &&
-              resident.pgy === pgyStartAtPrimarySite &&
-              primarySiteRotationIds.size > 0;
-            const fixedIsPrimary = primarySiteRotationIds.has(ruleRotation.id);
-            if (rem > 0 && (!isFirstMonthPgyMustBePrimary || fixedIsPrimary)) {
-              chosenRotation = ruleRotation;
-            }
+    for (const resident of residentsList) {
+      if (scheduledThisMonth.has(resident.id)) continue;
+      const ruleRotationId = fixedRuleMap.get(residentMonthKey(resident.id, month.id));
+      const onVacation = vacationSet.has(residentMonthKey(resident.id, month.id));
+      if (ruleRotationId && !onVacation) {
+        const ruleRotation = rotationById.get(ruleRotationId);
+        if (ruleRotation) {
+          const rem = capacity.get(capKey(month.id, ruleRotation.id)) ?? 0;
+          const isFirstMonthPgyMustBePrimary =
+            monthIndex === 0 &&
+            requirePgyStartAtPrimarySite &&
+            resident.pgy === pgyStartAtPrimarySite &&
+            primarySiteRotationIds.size > 0;
+          const fixedIsPrimary = primarySiteRotationIds.has(ruleRotation.id);
+          if (rem > 0 && (!isFirstMonthPgyMustBePrimary || fixedIsPrimary)) {
+            applyAssignment(resident.id, ruleRotation);
           }
         }
-        // When onVacation && noConsultWhenVacationInMonth: fall through to assign non-consult below.
       }
+    }
 
-      if (!chosenRotation) {
-        let eligible = rotationsList.filter((rot) => {
-          if (resident.pgy < rot.eligible_pgy_min || resident.pgy > rot.eligible_pgy_max) return false;
-          const rem = capacity.get(capKey(month.id, rot.id)) ?? 0;
-          return rem > 0;
-        });
+    const rotationPressure = (rot: Rotation) => {
+      let s = 0;
+      for (const res of residentsList) {
+        if (scheduledThisMonth.has(res.id)) continue;
+        s += required.get(reqKey(res.id, rot.id)) ?? 0;
+      }
+      return s;
+    };
+    const rotOrder = shuffle([...rotationsList]).sort((a, b) => rotationPressure(b) - rotationPressure(a));
+
+    for (const rot of rotOrder) {
+      let capLeft = capacity.get(capKey(month.id, rot.id)) ?? 0;
+      if (capLeft <= 0) continue;
+
+      const candidates: Resident[] = [];
+      for (const res of residentsList) {
+        if (scheduledThisMonth.has(res.id)) continue;
+        const onVacation = vacationSet.has(residentMonthKey(res.id, month.id));
+        if ((required.get(reqKey(res.id, rot.id)) ?? 0) <= 0) continue;
+        if (res.pgy < rot.eligible_pgy_min || res.pgy > rot.eligible_pgy_max) continue;
         if (
           monthIndex === 0 &&
           requirePgyStartAtPrimarySite &&
-          resident.pgy === pgyStartAtPrimarySite &&
+          res.pgy === pgyStartAtPrimarySite &&
           primarySiteRotationIds.size > 0 &&
-          eligible.length > 0
+          !primarySiteRotationIds.has(rot.id)
         ) {
-          const primaryOnly = eligible.filter((rot) => primarySiteRotationIds.has(rot.id));
-          if (primaryOnly.length > 0) eligible = primaryOnly;
+          continue;
         }
-        if (onVacation && noConsultWhenVacationInMonth && consultRotationIds.size > 0) {
-          eligible = eligible.filter((rot) => !consultRotationIds.has(rot.id));
-        }
+        if (onVacation && noConsultWhenVacationInMonth && consultRotationIds.has(rot.id)) continue;
+        const prevRotId = prevMonthAssignments.get(res.id);
         const hadConsultLastMonth =
-          avoidBackToBackConsult &&
-          (() => {
-            const prevRotId = prevMonthAssignments.get(resident.id);
-            return prevRotId != null && consultRotationIds.has(prevRotId);
-          })();
+          avoidBackToBackConsult && prevRotId != null && consultRotationIds.has(prevRotId);
+        if (hadConsultLastMonth && consultRotationIds.has(rot.id) && residentHasNonConsultNeedWithCapacity(res)) {
+          continue;
+        }
         const hadTransplantLastMonth =
-          avoidBackToBackTransplant &&
-          (() => {
-            const prevRotId = prevMonthAssignments.get(resident.id);
-            return prevRotId != null && transplantRotationIds.has(prevRotId);
-          })();
-        let candidatePool = eligible;
-        if (hadConsultLastMonth && eligible.length > 0) {
-          const eligibleNonConsult = eligible.filter((rot) => !consultRotationIds.has(rot.id));
-          if (eligibleNonConsult.length > 0) candidatePool = eligibleNonConsult;
-        }
-        if (hadTransplantLastMonth && candidatePool.length > 0) {
-          const eligibleNonTransplant = candidatePool.filter((rot) => !transplantRotationIds.has(rot.id));
-          if (eligibleNonTransplant.length > 0) candidatePool = eligibleNonTransplant;
-        }
+          avoidBackToBackTransplant && prevRotId != null && transplantRotationIds.has(prevRotId);
         if (
-          !onVacation &&
-          preferPrimarySiteForLongVacation &&
-          residentsWithLongVacation.has(resident.id) &&
-          primarySiteRotationIds.size > 0 &&
-          candidatePool.length > 0
+          hadTransplantLastMonth &&
+          transplantRotationIds.has(rot.id) &&
+          residentHasNonTransplantNeedWithCapacity(res)
         ) {
-          const primarySiteCandidates = candidatePool.filter((rot) => primarySiteRotationIds.has(rot.id));
-          if (primarySiteCandidates.length > 0) {
-            const requiredWithCapacityPrimary = primarySiteCandidates.filter((rot) => {
-              const rem = required.get(reqKey(resident.id, rot.id)) ?? 0;
-              return rem > 0;
-            });
-            if (requiredWithCapacityPrimary.length > 0) {
-              candidatePool = requiredWithCapacityPrimary;
-            } else {
-              candidatePool = primarySiteCandidates;
+          continue;
+        }
+        candidates.push(res);
+      }
+
+      const byNeed = new Map<number, Resident[]>();
+      for (const res of candidates) {
+        const n = required.get(reqKey(res.id, rot.id)) ?? 0;
+        if (!byNeed.has(n)) byNeed.set(n, []);
+        byNeed.get(n)!.push(res);
+      }
+      const tiers = [...byNeed.keys()].sort((a, b) => b - a);
+      for (const n of tiers) {
+        const group = shuffle(byNeed.get(n)!);
+        for (const res of group) {
+          if (capLeft <= 0) break;
+          if (scheduledThisMonth.has(res.id)) continue;
+          const ck = capKey(month.id, rot.id);
+          if ((capacity.get(ck) ?? 0) <= 0) break;
+          applyAssignment(res.id, rot);
+          capLeft = (capacity.get(ck) ?? 0);
+        }
+      }
+    }
+
+    for (const resident of orderedResidents) {
+      if (scheduledThisMonth.has(resident.id)) continue;
+
+      const ruleRotationId = fixedRuleMap.get(residentMonthKey(resident.id, month.id));
+      const onVacation = vacationSet.has(residentMonthKey(resident.id, month.id));
+
+      let chosenRotation: Rotation | null = null;
+
+      if (ruleRotationId && onVacation && noConsultWhenVacationInMonth) {
+        const ruleRotation = rotationById.get(ruleRotationId);
+        if (ruleRotation && (capacity.get(capKey(month.id, ruleRotation.id)) ?? 0) > 0) {
+          chosenRotation = ruleRotation;
+        }
+      }
+
+      if (!chosenRotation) {
+        let remainingTotal = 0;
+        for (const r of rotationsList) {
+          remainingTotal += required.get(reqKey(resident.id, r.id)) ?? 0;
+        }
+        const hadExplicitTargets = (initialReqTotalByResident.get(resident.id) ?? 0) > 0;
+        if (remainingTotal === 0 && hadExplicitTargets) {
+          // extra months unassigned
+        } else {
+          let eligible = rotationsList.filter((r) => {
+            if (resident.pgy < r.eligible_pgy_min || resident.pgy > r.eligible_pgy_max) return false;
+            return (capacity.get(capKey(month.id, r.id)) ?? 0) > 0;
+          });
+          if (
+            monthIndex === 0 &&
+            requirePgyStartAtPrimarySite &&
+            resident.pgy === pgyStartAtPrimarySite &&
+            primarySiteRotationIds.size > 0 &&
+            eligible.length > 0
+          ) {
+            const primaryOnly = eligible.filter((r) => primarySiteRotationIds.has(r.id));
+            if (primaryOnly.length > 0) eligible = primaryOnly;
+          }
+          if (onVacation && noConsultWhenVacationInMonth && consultRotationIds.size > 0) {
+            eligible = eligible.filter((r) => !consultRotationIds.has(r.id));
+          }
+          const hadConsultLastMonth =
+            avoidBackToBackConsult &&
+            (() => {
+              const prevRotId = prevMonthAssignments.get(resident.id);
+              return prevRotId != null && consultRotationIds.has(prevRotId);
+            })();
+          const hadTransplantLastMonth =
+            avoidBackToBackTransplant &&
+            (() => {
+              const prevRotId = prevMonthAssignments.get(resident.id);
+              return prevRotId != null && transplantRotationIds.has(prevRotId);
+            })();
+          let candidatePool = eligible;
+          if (hadConsultLastMonth && eligible.length > 0) {
+            const eligibleNonConsult = eligible.filter((r) => !consultRotationIds.has(r.id));
+            if (eligibleNonConsult.length > 0) candidatePool = eligibleNonConsult;
+          }
+          if (hadTransplantLastMonth && candidatePool.length > 0) {
+            const eligibleNonTransplant = candidatePool.filter((r) => !transplantRotationIds.has(r.id));
+            if (eligibleNonTransplant.length > 0) candidatePool = eligibleNonTransplant;
+          }
+          if (
+            !onVacation &&
+            preferPrimarySiteForLongVacation &&
+            residentsWithLongVacation.has(resident.id) &&
+            primarySiteRotationIds.size > 0 &&
+            candidatePool.length > 0
+          ) {
+            const primarySiteCandidates = candidatePool.filter((r) => primarySiteRotationIds.has(r.id));
+            if (primarySiteCandidates.length > 0) {
+              const requiredWithCapacityPrimary = primarySiteCandidates.filter((r) => {
+                return (required.get(reqKey(resident.id, r.id)) ?? 0) > 0;
+              });
+              if (requiredWithCapacityPrimary.length > 0) {
+                candidatePool = requiredWithCapacityPrimary;
+              } else {
+                candidatePool = primarySiteCandidates;
+              }
             }
           }
-        }
-        const requiredWithCapacity = candidatePool.filter((rot) => {
-          const rem = required.get(reqKey(resident.id, rot.id)) ?? 0;
-          return rem > 0;
-        });
-        if (requiredWithCapacity.length > 0) {
-          let maxReq = 0;
-          for (const rot of requiredWithCapacity) {
-            maxReq = Math.max(maxReq, required.get(reqKey(resident.id, rot.id)) ?? 0);
+          const requiredWithCapacity = candidatePool.filter((r) => {
+            return (required.get(reqKey(resident.id, r.id)) ?? 0) > 0;
+          });
+          if (requiredWithCapacity.length > 0) {
+            let maxReq = 0;
+            for (const r of requiredWithCapacity) {
+              maxReq = Math.max(maxReq, required.get(reqKey(resident.id, r.id)) ?? 0);
+            }
+            const tied = requiredWithCapacity.filter(
+              (r) => (required.get(reqKey(resident.id, r.id)) ?? 0) === maxReq
+            );
+            chosenRotation = tied[Math.floor(Math.random() * tied.length)];
+          } else if (candidatePool.length > 0 && remainingTotal === 0) {
+            chosenRotation = candidatePool[Math.floor(Math.random() * candidatePool.length)];
           }
-          const tied = requiredWithCapacity.filter(
-            (rot) => (required.get(reqKey(resident.id, rot.id)) ?? 0) === maxReq
-          );
-          chosenRotation = tied[Math.floor(Math.random() * tied.length)];
-        } else if (candidatePool.length > 0) {
-          chosenRotation = candidatePool[Math.floor(Math.random() * candidatePool.length)];
         }
       }
 
@@ -389,6 +546,7 @@ export async function generateSchedule({
         month_id: month.id,
         rotation_id: chosenRotation?.id ?? null,
       });
+      scheduledThisMonth.add(resident.id);
 
       if (chosenRotation) {
         const capKeyVal = capKey(month.id, chosenRotation.id);

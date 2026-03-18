@@ -1,3 +1,8 @@
+/**
+ * PGY-wide rotation requirement template. Scheduler uses per-resident requirements
+ * (`resident_rotation_requirements` via PUT /api/admin/resident-requirements) when
+ * any exist for a resident; otherwise falls back to these rows by PGY.
+ */
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";

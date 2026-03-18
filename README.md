@@ -23,6 +23,7 @@ In Supabase → **SQL Editor** → **New query**, run your migration SQL files i
 - `scripts/migrations/add_fixed_assignment_rules.sql`
 - `scripts/migrations/vacation_requests_week_based.sql`
 - `scripts/migrations/auth_profiles_and_rls.sql`
+- `scripts/migrations/add_resident_rotation_requirements.sql` — per-resident rotation targets (Setup → Rotation requirements). Until you save the per-resident grid, the scheduler still uses the PGY requirements matrix. A column may total less than 12; those extra months stay unassigned when you generate.
 
 ### 3) Create the director login (Supabase Auth)
 
