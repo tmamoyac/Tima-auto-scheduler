@@ -160,15 +160,6 @@ export async function generateSchedule({
     }
   }
 
-  const LONG_VACATION_DAYS = 8;
-  const residentsWithLongVacation = new Set<string>();
-  for (const v of vacationRanges) {
-    const startMs = new Date(v.start_date).getTime();
-    const endMs = new Date(v.end_date).getTime();
-    const days = Math.round((endMs - startMs) / (24 * 60 * 60 * 1000)) + 1;
-    if (days >= LONG_VACATION_DAYS) residentsWithLongVacation.add(v.resident_id);
-  }
-
   const { data: fixedRulesRows } = await supabaseAdmin
     .from("fixed_assignment_rules")
     .select("resident_id, month_id, rotation_id")
