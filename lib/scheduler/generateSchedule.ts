@@ -539,9 +539,9 @@ export async function generateSchedule({
             chosenRotation = tied[Math.floor(Math.random() * tied.length)];
           } else if (candidatePool.length > 0) {
             const notOverfilled = candidatePool.filter((r) => {
-              const init = initialRequired.get(reqKey(resident.id, r.id)) ?? 0;
+              const init = initialRequired.get(reqKey(resident.id, r.id));
               const rem = required.get(reqKey(resident.id, r.id)) ?? 0;
-              return init === 0 || rem > 0;
+              return init === undefined || rem > 0;
             });
             const pool = notOverfilled.length > 0 ? notOverfilled : candidatePool;
             chosenRotation = pool[Math.floor(Math.random() * pool.length)];
