@@ -634,6 +634,64 @@ export async function generateSchedule({
     }
   }
 
+  // Phase C: within-resident month rearrangement
+  // Move an existing assignment to an unassigned month to free a slot for a needed rotation
+  for (const resident of residentsList) {
+    const neededRotations: { rot: Rotation; rem: number }[] = [];
+    for (const rot of rotationsList) {
+      const rem = required.get(reqKey(resident.id, rot.id)) ?? 0;
+      if (rem > 0 && resident.pgy >= rot.eligible_pgy_min && resident.pgy <= rot.eligible_pgy_max) {
+        neededRotations.push({ rot, rem });
+      }
+    }
+    if (neededRotations.length === 0) continue;
+    neededRotations.sort((a, b) => b.rem - a.rem);
+
+    for (const { rot: neededRot } of neededRotations) {
+      for (const monthM of monthsList) {
+        if ((required.get(reqKey(resident.id, neededRot.id)) ?? 0) <= 0) break;
+
+        const ckX = capKey(monthM.id, neededRot.id);
+        if ((capacity.get(ckX) ?? 0) <= 0) continue;
+
+        const onVacM = vacationSet.has(residentMonthKey(resident.id, monthM.id));
+        if (onVacM && noConsultWhenVacationInMonth && consultRotationIds.has(neededRot.id)) continue;
+
+        const idxM = assignmentIndexMap.get(residentMonthKey(resident.id, monthM.id));
+        if (idxM === undefined) continue;
+        const currentRotId = assignmentRows[idxM].rotation_id;
+        if (currentRotId === null || currentRotId === neededRot.id) continue;
+
+        for (const monthMp of monthsList) {
+          if (monthMp.id === monthM.id) continue;
+          const idxMp = assignmentIndexMap.get(residentMonthKey(resident.id, monthMp.id));
+          if (idxMp === undefined) continue;
+          if (assignmentRows[idxMp].rotation_id !== null) continue;
+
+          const ckY = capKey(monthMp.id, currentRotId);
+          if ((capacity.get(ckY) ?? 0) <= 0) continue;
+
+          const onVacMp = vacationSet.has(residentMonthKey(resident.id, monthMp.id));
+          if (onVacMp && noConsultWhenVacationInMonth && consultRotationIds.has(currentRotId)) continue;
+
+          // Move Y from monthM to monthMp, assign X in monthM
+          assignmentRows[idxMp].rotation_id = currentRotId;
+          const ckYinM = capKey(monthM.id, currentRotId);
+          capacity.set(ckYinM, (capacity.get(ckYinM) ?? 0) + 1);
+          capacity.set(ckY, (capacity.get(ckY) ?? 0) - 1);
+
+          assignmentRows[idxM].rotation_id = neededRot.id;
+          capacity.set(ckX, (capacity.get(ckX) ?? 0) - 1);
+          required.set(
+            reqKey(resident.id, neededRot.id),
+            (required.get(reqKey(resident.id, neededRot.id)) ?? 0) - 1
+          );
+          break;
+        }
+      }
+    }
+  }
+
   if (assignmentRows.length > 0) {
     const { error: assignErr } = await supabaseAdmin.from("assignments").insert(assignmentRows);
     if (assignErr) throw assignErr;
