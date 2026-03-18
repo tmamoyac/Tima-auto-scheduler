@@ -497,47 +497,47 @@ export async function generateSchedule({
               const prevRotId = prevMonthAssignments.get(resident.id);
               return prevRotId != null && transplantRotationIds.has(prevRotId);
             })();
-          let candidatePool = eligible;
-          if (hadConsultLastMonth && eligible.length > 0) {
-            const eligibleNonConsult = eligible.filter((r) => !consultRotationIds.has(r.id));
-            if (eligibleNonConsult.length > 0) candidatePool = eligibleNonConsult;
-          }
-          if (hadTransplantLastMonth && candidatePool.length > 0) {
-            const eligibleNonTransplant = candidatePool.filter((r) => !transplantRotationIds.has(r.id));
-            if (eligibleNonTransplant.length > 0) candidatePool = eligibleNonTransplant;
-          }
-          if (
-            !onVacation &&
-            preferPrimarySiteForLongVacation &&
-            residentsWithLongVacation.has(resident.id) &&
-            primarySiteRotationIds.size > 0 &&
-            candidatePool.length > 0
-          ) {
-            const primarySiteCandidates = candidatePool.filter((r) => primarySiteRotationIds.has(r.id));
-            if (primarySiteCandidates.length > 0) {
-              const requiredWithCapacityPrimary = primarySiteCandidates.filter((r) => {
-                return (required.get(reqKey(resident.id, r.id)) ?? 0) > 0;
-              });
-              if (requiredWithCapacityPrimary.length > 0) {
-                candidatePool = requiredWithCapacityPrimary;
-              } else {
-                candidatePool = primarySiteCandidates;
-              }
-            }
-          }
-          const requiredWithCapacity = candidatePool.filter((r) => {
+          const requiredFromEligible = eligible.filter((r) => {
             return (required.get(reqKey(resident.id, r.id)) ?? 0) > 0;
           });
-          if (requiredWithCapacity.length > 0) {
+
+          if (requiredFromEligible.length > 0) {
+            let pool = requiredFromEligible;
+            if (hadConsultLastMonth) {
+              const alt = pool.filter((r) => !consultRotationIds.has(r.id));
+              if (alt.length > 0) pool = alt;
+            }
+            if (hadTransplantLastMonth) {
+              const alt = pool.filter((r) => !transplantRotationIds.has(r.id));
+              if (alt.length > 0) pool = alt;
+            }
+            if (
+              !onVacation &&
+              preferPrimarySiteForLongVacation &&
+              residentsWithLongVacation.has(resident.id) &&
+              primarySiteRotationIds.size > 0
+            ) {
+              const alt = pool.filter((r) => primarySiteRotationIds.has(r.id));
+              if (alt.length > 0) pool = alt;
+            }
             let maxReq = 0;
-            for (const r of requiredWithCapacity) {
+            for (const r of pool) {
               maxReq = Math.max(maxReq, required.get(reqKey(resident.id, r.id)) ?? 0);
             }
-            const tied = requiredWithCapacity.filter(
+            const tied = pool.filter(
               (r) => (required.get(reqKey(resident.id, r.id)) ?? 0) === maxReq
             );
             chosenRotation = tied[Math.floor(Math.random() * tied.length)];
-          } else if (candidatePool.length > 0) {
+          } else if (eligible.length > 0) {
+            let candidatePool = eligible;
+            if (hadConsultLastMonth) {
+              const alt = candidatePool.filter((r) => !consultRotationIds.has(r.id));
+              if (alt.length > 0) candidatePool = alt;
+            }
+            if (hadTransplantLastMonth) {
+              const alt = candidatePool.filter((r) => !transplantRotationIds.has(r.id));
+              if (alt.length > 0) candidatePool = alt;
+            }
             const notOverfilled = candidatePool.filter((r) => {
               const init = initialRequired.get(reqKey(resident.id, r.id));
               const rem = required.get(reqKey(resident.id, r.id)) ?? 0;
