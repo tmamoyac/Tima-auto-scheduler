@@ -1043,6 +1043,25 @@ async function buildScheduleVariation({
       const currRotId = assignmentLookup.get(residentMonthKey(res.id, currMId));
       if (!prevRotId || !currRotId) continue;
       const resName = `${res.first_name ?? ""} ${res.last_name ?? ""}`.trim();
+      if (avoidBackToBackConsult && mi >= 2) {
+        const prevPrevMId = monthsList[mi - 2].id;
+        const prevPrevRotId = assignmentLookup.get(residentMonthKey(res.id, prevPrevMId));
+        if (
+          prevPrevRotId &&
+          consultRotationIds.has(prevPrevRotId) &&
+          consultRotationIds.has(prevRotId) &&
+          consultRotationIds.has(currRotId)
+        ) {
+          const a = rotationById.get(prevPrevRotId)?.name ?? prevPrevRotId;
+          const b = rotationById.get(prevRotId)?.name ?? prevRotId;
+          const c = rotationById.get(currRotId)?.name ?? currRotId;
+          audit.softRuleViolations.push({
+            residentName: resName,
+            monthLabel: monthIdToLabel.get(currMId) ?? "",
+            rule: `3-in-a-row consult: ${a} → ${b} → ${c}`,
+          });
+        }
+      }
       if (avoidBackToBackConsult && consultRotationIds.has(prevRotId) && consultRotationIds.has(currRotId)) {
         const prevName = rotationById.get(prevRotId)?.name ?? "Consult";
         const currName = rotationById.get(currRotId)?.name ?? "Consult";
@@ -1161,6 +1180,13 @@ export async function generateSchedule({
 
     const hardOk = audit.requirementViolations.length === 0;
     if (!hardOk) continue;
+
+    // Unacceptable strict rule:
+    // If a resident has 3+ consult rotations consecutively, reject the schedule variation.
+    const tripleConsultViolations = audit.softRuleViolations.filter((v) =>
+      v.rule.startsWith("3-in-a-row consult:")
+    ).length;
+    if (tripleConsultViolations > 0) continue;
 
     const consultBackToBackViolations = audit.softRuleViolations.filter((v) =>
       v.rule.startsWith("Back-to-back consult:")
