@@ -880,7 +880,7 @@ async function buildScheduleVariation({
 
   // Strictly enforce back-to-back consult/transplant avoidance by driving pair score to 0.
   let pairScore = totalPairScore();
-  const MAX_SOFT_ITERS = 600;
+  const MAX_SOFT_ITERS = 3000;
 
   const rotAfterSwap = (resId: string, i: number, j: number, rotI: string, rotJ: string, idx: number): string | null => {
     if (idx === i) return rotJ;
@@ -1140,7 +1140,7 @@ export async function generateSchedule({
   supabaseAdmin: SupabaseClient;
   academicYearId: string;
 }): Promise<{ scheduleVersionId: string; audit: ScheduleAudit }> {
-  const maxAttempts = 25;
+  const maxAttempts = 60;
   const baseSeed = (hashStringToU32(academicYearId) ^ (Date.now() >>> 0)) >>> 0;
 
   let bestHard:
@@ -1190,6 +1190,16 @@ export async function generateSchedule({
   }
 
   // We found hard-valid schedules, but none satisfies the strict back-to-back consult/transplant constraints.
-  if (bestHard) throw new Error("SCHEDULE_CONSTRAINTS_UNSATISFIABLE");
+  if (bestHard) {
+    const consultCount = bestHard.audit.softRuleViolations.filter((v) =>
+      v.rule.startsWith("Back-to-back consult:")
+    ).length;
+    const transplantCount = bestHard.audit.softRuleViolations.filter((v) =>
+      v.rule.startsWith("Back-to-back transplant:")
+    ).length;
+    throw new Error(
+      `SCHEDULE_CONSTRAINTS_UNSATISFIABLE (best hard-valid: consult=${consultCount}, transplant=${transplantCount}, softTotal=${bestHard.audit.softRuleViolations.length})`
+    );
+  }
   throw new Error("SCHEDULE_CONSTRAINTS_UNSATISFIABLE");
 }
