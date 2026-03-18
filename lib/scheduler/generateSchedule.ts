@@ -692,6 +692,71 @@ export async function generateSchedule({
     }
   }
 
+  // Phase D: reduce back-to-back violations by swapping within a resident's schedule
+  const isViolatingType = (rotId: string): boolean =>
+    (avoidBackToBackConsult && consultRotationIds.has(rotId)) ||
+    (avoidBackToBackTransplant && transplantRotationIds.has(rotId));
+
+  const pairViolates = (rotA: string | null, rotB: string | null): boolean => {
+    if (!rotA || !rotB) return false;
+    if (avoidBackToBackConsult && consultRotationIds.has(rotA) && consultRotationIds.has(rotB)) return true;
+    if (avoidBackToBackTransplant && transplantRotationIds.has(rotA) && transplantRotationIds.has(rotB)) return true;
+    return false;
+  };
+
+  const getRotAt = (resId: string, mIdx: number): string | null => {
+    if (mIdx < 0 || mIdx >= monthsList.length) return null;
+    const idx = assignmentIndexMap.get(residentMonthKey(resId, monthsList[mIdx].id));
+    return idx !== undefined ? assignmentRows[idx].rotation_id : null;
+  };
+
+  for (let pass = 0; pass < 3; pass++) {
+    let swapped = false;
+    for (const resident of residentsList) {
+      for (let mi = 1; mi < monthsList.length; mi++) {
+        const prevRotId = getRotAt(resident.id, mi - 1);
+        const currRotId = getRotAt(resident.id, mi);
+        if (!pairViolates(prevRotId, currRotId)) continue;
+
+        const currMonth = monthsList[mi];
+        const currIdx = assignmentIndexMap.get(residentMonthKey(resident.id, currMonth.id))!;
+
+        for (let mj = 0; mj < monthsList.length; mj++) {
+          if (mj === mi || mj === mi - 1) continue;
+          const swapMonth = monthsList[mj];
+          const swapIdx = assignmentIndexMap.get(residentMonthKey(resident.id, swapMonth.id));
+          if (swapIdx === undefined) continue;
+          const swapRotId = assignmentRows[swapIdx].rotation_id;
+          if (!swapRotId || swapRotId === currRotId) continue;
+          if (isViolatingType(swapRotId)) continue;
+
+          if (pairViolates(getRotAt(resident.id, mj - 1), currRotId)) continue;
+          if (pairViolates(currRotId, getRotAt(resident.id, mj + 1))) continue;
+          if (pairViolates(getRotAt(resident.id, mi - 1), swapRotId)) continue;
+          if (pairViolates(swapRotId, getRotAt(resident.id, mi + 1))) continue;
+
+          if ((capacity.get(capKey(swapMonth.id, currRotId!)) ?? 0) < 1) continue;
+          if ((capacity.get(capKey(currMonth.id, swapRotId)) ?? 0) < 1) continue;
+
+          const onVacCurr = vacationSet.has(residentMonthKey(resident.id, currMonth.id));
+          const onVacSwap = vacationSet.has(residentMonthKey(resident.id, swapMonth.id));
+          if (onVacCurr && noConsultWhenVacationInMonth && consultRotationIds.has(swapRotId)) continue;
+          if (onVacSwap && noConsultWhenVacationInMonth && consultRotationIds.has(currRotId!)) continue;
+
+          assignmentRows[currIdx].rotation_id = swapRotId;
+          assignmentRows[swapIdx].rotation_id = currRotId;
+          capacity.set(capKey(currMonth.id, currRotId!), (capacity.get(capKey(currMonth.id, currRotId!)) ?? 0) + 1);
+          capacity.set(capKey(currMonth.id, swapRotId), (capacity.get(capKey(currMonth.id, swapRotId)) ?? 0) - 1);
+          capacity.set(capKey(swapMonth.id, swapRotId), (capacity.get(capKey(swapMonth.id, swapRotId)) ?? 0) + 1);
+          capacity.set(capKey(swapMonth.id, currRotId!), (capacity.get(capKey(swapMonth.id, currRotId!)) ?? 0) - 1);
+          swapped = true;
+          break;
+        }
+      }
+    }
+    if (!swapped) break;
+  }
+
   if (assignmentRows.length > 0) {
     const { error: assignErr } = await supabaseAdmin.from("assignments").insert(assignmentRows);
     if (assignErr) throw assignErr;
