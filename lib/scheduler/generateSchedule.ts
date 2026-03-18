@@ -887,7 +887,7 @@ export async function generateSchedule({
   const totalSoftScore = (): number => residentsList.reduce((sum, r) => sum + residentSoftScore(r), 0);
 
   let softScore = totalSoftScore();
-  const MAX_SOFT_ITERS = 2000;
+  const MAX_SOFT_ITERS = 600;
 
   const rotAfterSwap = (resId: string, i: number, j: number, rotI: string, rotJ: string, idx: number): string | null => {
     if (idx === i) return rotJ;
@@ -953,65 +953,58 @@ export async function generateSchedule({
   };
 
   for (let iter = 0; iter < MAX_SOFT_ITERS && softScore > 3; iter++) {
-    // Pick a target resident/indices based on the current soft violations.
-    let target: { resident: Resident; baseIndices: number[] } | null = null;
-
-    // Prioritize PGY-start violations if they exist.
-    if (requirePgyStartAtPrimarySite) {
-      for (const resident of residentsList) {
-        const v = pgyStartViolationCount(resident);
-        if (v > 0) {
-          target = { resident, baseIndices: [0] };
-          break;
-        }
-      }
-    }
-
-    // Otherwise pick the first back-to-back violation pair.
-    if (!target) {
-      outer: for (const resident of residentsList) {
-        for (let mi = 1; mi < monthsList.length; mi++) {
-          const prev = getRotAt(resident.id, mi - 1);
-          const curr = getRotAt(resident.id, mi);
-          const v = pairViolationCount(prev, curr);
-          if (v > 0) {
-            target = { resident, baseIndices: [mi - 1, mi] };
-            break outer;
-          }
-        }
-      }
-    }
-
-    if (!target) break;
-
+    // Global greedy search: find the best improving swap anywhere that
+    // touches an existing violating adjacency (or the first month if PGY-start is violated).
     let bestDelta = 0;
-    let bestSwap: { i: number; j: number } | null = null;
+    let bestSwap:
+      | {
+          resident: Resident;
+          i: number;
+          j: number;
+        }
+      | null = null;
 
-    // Try swaps involving the indices from the violating pair.
-    for (const base of target.baseIndices) {
-      const rotBase = getRotAt(target.resident.id, base);
-      if (!rotBase) continue;
+    for (const resident of residentsList) {
+      const baseIndices = new Set<number>();
 
-      for (let other = 0; other < monthsList.length; other++) {
-        if (other === base) continue;
-        const rotOther = getRotAt(target.resident.id, other);
-        if (!rotOther || rotOther === rotBase) continue;
+      // PGY-start violations involve the first month.
+      if (requirePgyStartAtPrimarySite && pgyStartViolationCount(resident) > 0) baseIndices.add(0);
 
-        // Hard constraint: capacity must allow the swapped rotations.
-        if ((capacity.get(capKey(monthsList[other].id, rotBase)) ?? 0) < 1) continue;
-        if ((capacity.get(capKey(monthsList[base].id, rotOther)) ?? 0) < 1) continue;
+      // Any violating adjacent pair contributes both indices to consider.
+      for (let mi = 1; mi < monthsList.length; mi++) {
+        const prev = getRotAt(resident.id, mi - 1);
+        const curr = getRotAt(resident.id, mi);
+        if (pairViolationCount(prev, curr) > 0) {
+          baseIndices.add(mi - 1);
+          baseIndices.add(mi);
+        }
+      }
 
-        const delta = deltaSoftScoreForSwap(target.resident, base, other);
-        if (delta < bestDelta) {
-          bestDelta = delta;
-          bestSwap = { i: base, j: other };
+      for (const i of baseIndices) {
+        const rotI = getRotAt(resident.id, i);
+        if (!rotI) continue;
+
+        for (let j = 0; j < monthsList.length; j++) {
+          if (j === i) continue;
+          const rotJ = getRotAt(resident.id, j);
+          if (!rotJ || rotJ === rotI) continue;
+
+          // Hard constraint: capacity must allow the swapped rotations.
+          if ((capacity.get(capKey(monthsList[j].id, rotI)) ?? 0) < 1) continue;
+          if ((capacity.get(capKey(monthsList[i].id, rotJ)) ?? 0) < 1) continue;
+
+          const delta = deltaSoftScoreForSwap(resident, i, j);
+          if (delta < bestDelta) {
+            bestDelta = delta;
+            bestSwap = { resident, i, j };
+          }
         }
       }
     }
 
     if (!bestSwap || bestDelta >= 0) break;
 
-    const didApply = applySwap(target.resident, bestSwap.i, bestSwap.j);
+    const didApply = applySwap(bestSwap.resident, bestSwap.i, bestSwap.j);
     if (!didApply) break;
     softScore += bestDelta;
   }
