@@ -1275,9 +1275,32 @@ export async function generateSchedule({
         audit: ScheduleAudit;
         attempt: number;
         seed: number;
+        consultBackToBackViolations: number;
+        transplantBackToBackViolations: number;
       }
     | null = null;
   let bestSoft = Infinity;
+
+  const isBetterFallback = (
+    next: {
+      consultBackToBackViolations: number;
+      transplantBackToBackViolations: number;
+      softCount: number;
+    },
+    prev: {
+      consultBackToBackViolations: number;
+      transplantBackToBackViolations: number;
+      softCount: number;
+    }
+  ): boolean => {
+    if (next.consultBackToBackViolations !== prev.consultBackToBackViolations) {
+      return next.consultBackToBackViolations < prev.consultBackToBackViolations;
+    }
+    if (next.transplantBackToBackViolations !== prev.transplantBackToBackViolations) {
+      return next.transplantBackToBackViolations < prev.transplantBackToBackViolations;
+    }
+    return next.softCount < prev.softCount;
+  };
 
   const staticData = await loadSchedulerStaticData({ supabaseAdmin, academicYearId });
 
@@ -1319,9 +1342,29 @@ export async function generateSchedule({
 
     // Track the best hard-valid schedule (even if strict back-to-back is not 0).
     // We'll use this as the fallback if strict back-to-back constraints are infeasible.
-    if (softCount < bestSoft) {
+    const nextFallback = {
+      consultBackToBackViolations,
+      transplantBackToBackViolations,
+      softCount,
+    };
+    const prevFallback = bestHard
+      ? {
+          consultBackToBackViolations: bestHard.consultBackToBackViolations,
+          transplantBackToBackViolations: bestHard.transplantBackToBackViolations,
+          softCount: bestSoft,
+        }
+      : null;
+
+    if (!prevFallback || isBetterFallback(nextFallback, prevFallback)) {
       bestSoft = softCount;
-      bestHard = { assignmentRows, audit, attempt, seed };
+      bestHard = {
+        assignmentRows,
+        audit,
+        attempt,
+        seed,
+        consultBackToBackViolations,
+        transplantBackToBackViolations,
+      };
     }
   }
 
