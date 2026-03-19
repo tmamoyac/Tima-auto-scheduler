@@ -1018,6 +1018,7 @@ async function buildScheduleVariation({
   // This specifically helps eliminate stubborn "UCI Orange -> UCI Orange" adjacency
   // when a purely greedy improving-search gets stuck.
   let nonImprovingMovesUsed = 0;
+  // Vercel redeploy marker: keep the minimizer escape logic intact.
   const MAX_NON_IMPROVING_MOVES = 200;
 
   for (let iter = 0; iter < MAX_SOFT_ITERS && pairScore > 0; iter++) {
