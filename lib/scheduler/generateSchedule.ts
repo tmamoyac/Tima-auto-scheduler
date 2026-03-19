@@ -959,7 +959,7 @@ async function buildScheduleVariation({
 
   // Strictly enforce back-to-back consult/transplant avoidance by driving pair score to 0.
   let pairScore = totalPairScore();
-  const MAX_SOFT_ITERS = avoidBackToBackConsult ? 4000 : 2000;
+  const MAX_SOFT_ITERS = avoidBackToBackConsult ? 1200 : 700;
 
   const rotAfterSwap = (resId: string, i: number, j: number, rotI: string, rotJ: string, idx: number): string | null => {
     if (idx === i) return rotJ;
@@ -1023,7 +1023,7 @@ async function buildScheduleVariation({
   // How many times we're willing to apply a swap that *increases* pairScore
   // before giving up (delta > 0). Delta==0 moves are free since they can
   // change the local configuration without worsening the target pairScore.
-  const MAX_NON_IMPROVING_MOVES = 2000;
+  const MAX_NON_IMPROVING_MOVES = 300;
 
   for (
     let iter = 0;
@@ -1351,9 +1351,9 @@ export async function generateSchedule({
   // When avoiding back-to-back strenuous consults, increase retry budget to
   // give the in-memory repair/minimizer enough opportunity to discover a
   // zero-violation arrangement (if one exists).
-  const maxAttempts = staticData.avoidBackToBackConsult ? 300 : 120;
+  const maxAttempts = staticData.avoidBackToBackConsult ? 80 : 40;
   // Hard wall-clock budget so generation always returns promptly with best fallback.
-  const deadlineTs = Date.now() + (staticData.avoidBackToBackConsult ? 25000 : 15000);
+  const deadlineTs = Date.now() + (staticData.avoidBackToBackConsult ? 12000 : 8000);
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (Date.now() >= deadlineTs) break;
