@@ -1018,8 +1018,10 @@ async function buildScheduleVariation({
   // This specifically helps eliminate stubborn "UCI Orange -> UCI Orange" adjacency
   // when a purely greedy improving-search gets stuck.
   let nonImprovingMovesUsed = 0;
-  // Vercel redeploy marker: keep the minimizer escape logic intact.
-  const MAX_NON_IMPROVING_MOVES = 200;
+  // How many times we're willing to apply a swap that *increases* pairScore
+  // before giving up (delta > 0). Delta==0 moves are free since they can
+  // change the local configuration without worsening the target pairScore.
+  const MAX_NON_IMPROVING_MOVES = 2000;
 
   for (let iter = 0; iter < MAX_SOFT_ITERS && pairScore > 0; iter++) {
     // Global greedy search: find the best improving swap anywhere that
@@ -1066,6 +1068,9 @@ async function buildScheduleVariation({
           if (delta < bestDelta) {
             bestDelta = delta;
             bestSwap = { resident, i, j };
+          } else if (delta === bestDelta && bestSwap) {
+            // Randomized tie-break to avoid deterministic cycling on flat landscapes.
+            if (rng() < 0.2) bestSwap = { resident, i, j };
           }
         }
       }
@@ -1076,13 +1081,15 @@ async function buildScheduleVariation({
     const didApply = applySwap(bestSwap.resident, bestSwap.i, bestSwap.j);
     if (!didApply) break;
 
-    // Greedy improvement is always allowed. If it doesn't improve, we only allow it
-    // up to a limit to escape local minima.
-    if (bestDelta < 0) {
-      nonImprovingMovesUsed = 0;
-    } else {
+    // Greedy improvement is always allowed.
+    // If delta == 0 (no pairScore change), allow it freely so we can explore
+    // alternative configurations that may unlock improving moves later.
+    // If delta > 0 (worse pairScore), only allow it up to a limit.
+    if (bestDelta > 0) {
       nonImprovingMovesUsed += 1;
       if (nonImprovingMovesUsed > MAX_NON_IMPROVING_MOVES) break;
+    } else {
+      nonImprovingMovesUsed = 0;
     }
 
     pairScore += bestDelta;
