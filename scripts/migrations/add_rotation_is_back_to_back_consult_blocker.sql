@@ -7,3 +7,5 @@ alter table rotations
 comment on column rotations.is_back_to_back_consult_blocker is
   'When true, this rotation is used by the scheduler to avoid back-to-back (and 3-in-a-row) "strenuous consult" months.';
 
+-- No-op change to force a fresh Vercel rebuild/deploy.
+
