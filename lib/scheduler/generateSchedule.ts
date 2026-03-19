@@ -957,7 +957,7 @@ async function buildScheduleVariation({
 
   // Strictly enforce back-to-back consult/transplant avoidance by driving pair score to 0.
   let pairScore = totalPairScore();
-  const MAX_SOFT_ITERS = 3000;
+  const MAX_SOFT_ITERS = avoidBackToBackConsult ? 8000 : 3000;
 
   const rotAfterSwap = (resId: string, i: number, j: number, rotI: string, rotJ: string, idx: number): string | null => {
     if (idx === i) return rotJ;
@@ -1291,7 +1291,6 @@ export async function generateSchedule({
   supabaseAdmin: SupabaseClient;
   academicYearId: string;
 }): Promise<{ scheduleVersionId: string; audit: ScheduleAudit }> {
-  const maxAttempts = 60;
   const baseSeed = (hashStringToU32(academicYearId) ^ (Date.now() >>> 0)) >>> 0;
 
   let bestHard:
@@ -1328,6 +1327,11 @@ export async function generateSchedule({
   };
 
   const staticData = await loadSchedulerStaticData({ supabaseAdmin, academicYearId });
+
+  // When avoiding back-to-back strenuous consults, increase retry budget to
+  // give the in-memory repair/minimizer enough opportunity to discover a
+  // zero-violation arrangement (if one exists).
+  const maxAttempts = staticData.avoidBackToBackConsult ? 120 : 60;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const seed = (baseSeed + attempt) >>> 0;
