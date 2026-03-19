@@ -266,9 +266,10 @@ async function buildScheduleVariation({
   }
 
   // Backward compatibility: if no blocker rotations are configured, fall back to treating all consult rotations
-  // as the blocker set for back-to-back minimization/audit.
+  // as the strenuous set for back-to-back minimization/audit.
   const consultRotationIdsForBackToBack =
     backToBackBlockerRotationIds.size > 0 ? backToBackBlockerRotationIds : consultRotationIdsForVacation;
+  const useStrenuousConsultLabels = backToBackBlockerRotationIds.size > 0;
 
   const vacationSet = new Set<string>();
   for (const month of monthsList) {
@@ -926,18 +927,26 @@ async function buildScheduleVariation({
     return idx !== undefined ? assignmentRows[idx].rotation_id : null;
   };
 
-  const pairViolationCount = (rotA: string | null, rotB: string | null): number => {
+  const strenuousConsultPairViolation = (rotA: string | null, rotB: string | null): number => {
     if (!rotA || !rotB) return 0;
-    let c = 0;
     if (
-      avoidBackToBackConsult &&
-      consultRotationIdsForBackToBack.has(rotA) &&
-      consultRotationIdsForBackToBack.has(rotB)
+      !avoidBackToBackConsult ||
+      !consultRotationIdsForBackToBack.has(rotA) ||
+      !consultRotationIdsForBackToBack.has(rotB)
     )
-      c += 1;
-    if (avoidBackToBackTransplant && transplantRotationIds.has(rotA) && transplantRotationIds.has(rotB)) c += 1;
-    return c;
+      return 0;
+    return 1;
   };
+
+  const transplantPairViolation = (rotA: string | null, rotB: string | null): number => {
+    if (!rotA || !rotB) return 0;
+    if (avoidBackToBackTransplant && transplantRotationIds.has(rotA) && transplantRotationIds.has(rotB)) return 1;
+    return 0;
+  };
+
+  /** Combined score (legacy helper for any joint minimization). */
+  const pairViolationCount = (rotA: string | null, rotB: string | null): number =>
+    strenuousConsultPairViolation(rotA, rotB) + transplantPairViolation(rotA, rotB);
 
   const pgyStartViolationCount = (resident: Resident): number => {
     if (!requirePgyStartAtPrimarySite) return 0;
@@ -947,27 +956,18 @@ async function buildScheduleVariation({
     return primarySiteRotationIds.has(firstRotId) ? 0 : 1;
   };
 
-  const residentPairScore = (resident: Resident): number => {
-    let score = 0;
-    for (let mi = 1; mi < monthsList.length; mi++) {
-      score += pairViolationCount(getRotAt(resident.id, mi - 1), getRotAt(resident.id, mi));
-    }
-    return score;
-  };
-
-  const totalPairScore = (): number => residentsList.reduce((sum, r) => sum + residentPairScore(r), 0);
-
-  // Strictly enforce back-to-back consult/transplant avoidance by driving pair score to 0.
-  let pairScore = totalPairScore();
-  const MAX_SOFT_ITERS = avoidBackToBackConsult ? 1200 : 700;
-
   const rotAfterSwap = (resId: string, i: number, j: number, rotI: string, rotJ: string, idx: number): string | null => {
     if (idx === i) return rotJ;
     if (idx === j) return rotI;
     return getRotAt(resId, idx);
   };
 
-  const deltaPairScoreForSwap = (resident: Resident, i: number, j: number): number => {
+  const deltaMetricForSwap = (
+    resident: Resident,
+    i: number,
+    j: number,
+    metric: (a: string | null, b: string | null) => number
+  ): number => {
     const rotI = getRotAt(resident.id, i);
     const rotJ = getRotAt(resident.id, j);
     if (!rotI || !rotJ || rotI === rotJ) return 0;
@@ -983,10 +983,19 @@ async function buildScheduleVariation({
       const newPrev = rotAfterSwap(resident.id, i, j, rotI, rotJ, start);
       const newCurr = rotAfterSwap(resident.id, i, j, rotI, rotJ, start + 1);
 
-      delta += pairViolationCount(newPrev, newCurr) - pairViolationCount(oldPrev, oldCurr);
+      delta += metric(newPrev, newCurr) - metric(oldPrev, oldCurr);
     }
 
     return delta;
+  };
+
+  const deltaPairScoreForSwap = (resident: Resident, i: number, j: number): number => {
+    const dFull = deltaMetricForSwap(resident, i, j, pairViolationCount);
+    if (!avoidBackToBackConsult) return dFull;
+    const dStrenuous = deltaMetricForSwap(resident, i, j, strenuousConsultPairViolation);
+    // Highest priority: never accept a swap that increases strenuous consult back-to-back count.
+    if (dStrenuous > 0) return Number.POSITIVE_INFINITY;
+    return dFull;
   };
 
   const applySwap = (resident: Resident, i: number, j: number) => {
@@ -1014,6 +1023,20 @@ async function buildScheduleVariation({
     assignmentRows[idxJ].rotation_id = rotI;
     return true;
   };
+
+  const residentPairScore = (resident: Resident): number => {
+    let score = 0;
+    for (let mi = 1; mi < monthsList.length; mi++) {
+      score += pairViolationCount(getRotAt(resident.id, mi - 1), getRotAt(resident.id, mi));
+    }
+    return score;
+  };
+
+  const totalPairScore = (): number => residentsList.reduce((sum, r) => sum + residentPairScore(r), 0);
+
+  // Strictly reduce soft pair violations (strenuous consult b2b has lexicographic priority via deltaPairScoreForSwap).
+  let pairScore = totalPairScore();
+  const MAX_SOFT_ITERS = avoidBackToBackConsult ? 1200 : 700;
 
   // Allow the soft minimizer to escape local minima by sometimes applying
   // swaps that do not immediately reduce the targeted pairScore.
@@ -1168,7 +1191,9 @@ async function buildScheduleVariation({
           audit.softRuleViolations.push({
             residentName: resName,
             monthLabel: monthIdToLabel.get(currMId) ?? "",
-            rule: `3-in-a-row consult: ${a} → ${b} → ${c}`,
+            rule: useStrenuousConsultLabels
+              ? `3-in-a-row strenuous consult: ${a} → ${b} → ${c}`
+              : `3-in-a-row consult: ${a} → ${b} → ${c}`,
           });
         }
       }
@@ -1182,7 +1207,9 @@ async function buildScheduleVariation({
         audit.softRuleViolations.push({
           residentName: resName,
           monthLabel: monthIdToLabel.get(currMId) ?? "",
-          rule: `Back-to-back consult: ${prevName} → ${currName}`,
+          rule: useStrenuousConsultLabels
+            ? `Back-to-back strenuous consult: ${prevName} → ${currName}`
+            : `Back-to-back consult: ${prevName} → ${currName}`,
         });
       }
       if (avoidBackToBackTransplant && transplantRotationIds.has(prevRotId) && transplantRotationIds.has(currRotId)) {
@@ -1210,6 +1237,14 @@ async function buildScheduleVariation({
   }
 
   return { assignmentRows, audit };
+}
+
+/** Counts back-to-back consult rows for rotations in the strenuous/blocker set (or all consults if fallback). */
+function countStrenuousConsultBackToBackViolations(audit: ScheduleAudit): number {
+  return audit.softRuleViolations.filter(
+    (v) =>
+      v.rule.startsWith("Back-to-back strenuous consult:") || v.rule.startsWith("Back-to-back consult:")
+  ).length;
 }
 
 function hashStringToU32(input: string): number {
@@ -1307,7 +1342,7 @@ export async function generateSchedule({
         audit: ScheduleAudit;
         attempt: number;
         seed: number;
-        consultBackToBackViolations: number;
+        strenuousConsultBackToBackViolations: number;
         transplantBackToBackViolations: number;
       }
     | null = null;
@@ -1319,7 +1354,7 @@ export async function generateSchedule({
         attempt: number;
         seed: number;
         requirementViolations: number;
-        consultBackToBackViolations: number;
+        strenuousConsultBackToBackViolations: number;
         transplantBackToBackViolations: number;
         softCount: number;
       }
@@ -1327,18 +1362,18 @@ export async function generateSchedule({
 
   const isBetterFallback = (
     next: {
-      consultBackToBackViolations: number;
+      strenuousConsultBackToBackViolations: number;
       transplantBackToBackViolations: number;
       softCount: number;
     },
     prev: {
-      consultBackToBackViolations: number;
+      strenuousConsultBackToBackViolations: number;
       transplantBackToBackViolations: number;
       softCount: number;
     }
   ): boolean => {
-    if (next.consultBackToBackViolations !== prev.consultBackToBackViolations) {
-      return next.consultBackToBackViolations < prev.consultBackToBackViolations;
+    if (next.strenuousConsultBackToBackViolations !== prev.strenuousConsultBackToBackViolations) {
+      return next.strenuousConsultBackToBackViolations < prev.strenuousConsultBackToBackViolations;
     }
     if (next.transplantBackToBackViolations !== prev.transplantBackToBackViolations) {
       return next.transplantBackToBackViolations < prev.transplantBackToBackViolations;
@@ -1360,9 +1395,7 @@ export async function generateSchedule({
     const seed = (baseSeed + attempt) >>> 0;
     const { assignmentRows, audit } = await buildScheduleVariation({ staticData, seed, deadlineTs });
 
-    const consultBackToBackViolations = audit.softRuleViolations.filter((v) =>
-      v.rule.startsWith("Back-to-back consult:")
-    ).length;
+    const strenuousConsultBackToBackViolations = countStrenuousConsultBackToBackViolations(audit);
     const transplantBackToBackViolations = audit.softRuleViolations.filter((v) =>
       v.rule.startsWith("Back-to-back transplant:")
     ).length;
@@ -1376,12 +1409,12 @@ export async function generateSchedule({
       !bestAny ||
       reqViolCount < bestAny.requirementViolations ||
       (reqViolCount === bestAny.requirementViolations &&
-        consultBackToBackViolations < bestAny.consultBackToBackViolations) ||
+        strenuousConsultBackToBackViolations < bestAny.strenuousConsultBackToBackViolations) ||
       (reqViolCount === bestAny.requirementViolations &&
-        consultBackToBackViolations === bestAny.consultBackToBackViolations &&
+        strenuousConsultBackToBackViolations === bestAny.strenuousConsultBackToBackViolations &&
         transplantBackToBackViolations < bestAny.transplantBackToBackViolations) ||
       (reqViolCount === bestAny.requirementViolations &&
-        consultBackToBackViolations === bestAny.consultBackToBackViolations &&
+        strenuousConsultBackToBackViolations === bestAny.strenuousConsultBackToBackViolations &&
         transplantBackToBackViolations === bestAny.transplantBackToBackViolations &&
         softCount < bestAny.softCount)
     ) {
@@ -1391,7 +1424,7 @@ export async function generateSchedule({
         attempt,
         seed,
         requirementViolations: reqViolCount,
-        consultBackToBackViolations,
+        strenuousConsultBackToBackViolations,
         transplantBackToBackViolations,
         softCount,
       };
@@ -1400,7 +1433,8 @@ export async function generateSchedule({
     const hardOk = reqViolCount === 0;
     if (!hardOk) continue;
 
-    const strictPairOk = consultBackToBackViolations === 0 && transplantBackToBackViolations === 0;
+    const strictPairOk =
+      strenuousConsultBackToBackViolations === 0 && transplantBackToBackViolations === 0;
 
     // Strict acceptance: strict back-to-back counts must be 0 AND total soft violations must be <= 5.
     if (strictPairOk && softCount <= 5) {
@@ -1417,13 +1451,13 @@ export async function generateSchedule({
     // Track the best hard-valid schedule (even if strict back-to-back is not 0).
     // We'll use this as the fallback if strict back-to-back constraints are infeasible.
     const nextFallback = {
-      consultBackToBackViolations,
+      strenuousConsultBackToBackViolations,
       transplantBackToBackViolations,
       softCount,
     };
     const prevFallback = bestHard
       ? {
-          consultBackToBackViolations: bestHard.consultBackToBackViolations,
+          strenuousConsultBackToBackViolations: bestHard.strenuousConsultBackToBackViolations,
           transplantBackToBackViolations: bestHard.transplantBackToBackViolations,
           softCount: bestSoft,
         }
@@ -1436,7 +1470,7 @@ export async function generateSchedule({
         audit,
         attempt,
         seed,
-        consultBackToBackViolations,
+        strenuousConsultBackToBackViolations,
         transplantBackToBackViolations,
       };
     }
