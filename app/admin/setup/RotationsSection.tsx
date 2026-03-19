@@ -328,6 +328,7 @@ export function RotationsSection({
                       eligible_pgy_min: 1,
                       eligible_pgy_max: 3,
                       is_consult: false,
+                      is_back_to_back_consult_blocker: false,
                       is_transplant: false,
                       is_primary_site: false,
                     });
