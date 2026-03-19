@@ -225,9 +225,11 @@ async function loadSchedulerStaticData({
 async function buildScheduleVariation({
   staticData,
   seed,
+  deadlineTs,
 }: {
   staticData: LoadedSchedulerStaticData;
   seed: number;
+  deadlineTs?: number;
 }): Promise<{
   assignmentRows: { resident_id: string; month_id: string; rotation_id: string | null }[];
   audit: ScheduleAudit;
@@ -957,7 +959,7 @@ async function buildScheduleVariation({
 
   // Strictly enforce back-to-back consult/transplant avoidance by driving pair score to 0.
   let pairScore = totalPairScore();
-  const MAX_SOFT_ITERS = avoidBackToBackConsult ? 8000 : 3000;
+  const MAX_SOFT_ITERS = avoidBackToBackConsult ? 4000 : 2000;
 
   const rotAfterSwap = (resId: string, i: number, j: number, rotI: string, rotJ: string, idx: number): string | null => {
     if (idx === i) return rotJ;
@@ -1023,7 +1025,13 @@ async function buildScheduleVariation({
   // change the local configuration without worsening the target pairScore.
   const MAX_NON_IMPROVING_MOVES = 2000;
 
-  for (let iter = 0; iter < MAX_SOFT_ITERS && pairScore > 0; iter++) {
+  for (
+    let iter = 0;
+    iter < MAX_SOFT_ITERS &&
+    pairScore > 0 &&
+    (deadlineTs === undefined || Date.now() < deadlineTs);
+    iter++
+  ) {
     // Global greedy search: find the best improving swap anywhere that
     // touches an existing violating adjacency (or the first month if PGY-start is violated).
     let bestDelta = Number.POSITIVE_INFINITY;
@@ -1344,10 +1352,13 @@ export async function generateSchedule({
   // give the in-memory repair/minimizer enough opportunity to discover a
   // zero-violation arrangement (if one exists).
   const maxAttempts = staticData.avoidBackToBackConsult ? 300 : 120;
+  // Hard wall-clock budget so generation always returns promptly with best fallback.
+  const deadlineTs = Date.now() + (staticData.avoidBackToBackConsult ? 25000 : 15000);
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (Date.now() >= deadlineTs) break;
     const seed = (baseSeed + attempt) >>> 0;
-    const { assignmentRows, audit } = await buildScheduleVariation({ staticData, seed });
+    const { assignmentRows, audit } = await buildScheduleVariation({ staticData, seed, deadlineTs });
 
     const consultBackToBackViolations = audit.softRuleViolations.filter((v) =>
       v.rule.startsWith("Back-to-back consult:")
