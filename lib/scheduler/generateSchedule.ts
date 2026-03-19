@@ -1340,13 +1340,6 @@ export async function generateSchedule({
     const hardOk = audit.requirementViolations.length === 0;
     if (!hardOk) continue;
 
-    // Unacceptable strict rule:
-    // If a resident has 3+ consult rotations consecutively, reject the schedule variation.
-    const tripleConsultViolations = audit.softRuleViolations.filter((v) =>
-      v.rule.startsWith("3-in-a-row consult:")
-    ).length;
-    if (tripleConsultViolations > 0) continue;
-
     const consultBackToBackViolations = audit.softRuleViolations.filter((v) =>
       v.rule.startsWith("Back-to-back consult:")
     ).length;
