@@ -1013,10 +1013,17 @@ async function buildScheduleVariation({
     return true;
   };
 
+  // Allow the soft minimizer to escape local minima by sometimes applying
+  // swaps that do not immediately reduce the targeted pairScore.
+  // This specifically helps eliminate stubborn "UCI Orange -> UCI Orange" adjacency
+  // when a purely greedy improving-search gets stuck.
+  let nonImprovingMovesUsed = 0;
+  const MAX_NON_IMPROVING_MOVES = 200;
+
   for (let iter = 0; iter < MAX_SOFT_ITERS && pairScore > 0; iter++) {
     // Global greedy search: find the best improving swap anywhere that
     // touches an existing violating adjacency (or the first month if PGY-start is violated).
-    let bestDelta = 0;
+    let bestDelta = Number.POSITIVE_INFINITY;
     let bestSwap:
       | {
           resident: Resident;
@@ -1063,10 +1070,20 @@ async function buildScheduleVariation({
       }
     }
 
-    if (!bestSwap || bestDelta >= 0) break;
+    if (!bestSwap) break;
 
     const didApply = applySwap(bestSwap.resident, bestSwap.i, bestSwap.j);
     if (!didApply) break;
+
+    // Greedy improvement is always allowed. If it doesn't improve, we only allow it
+    // up to a limit to escape local minima.
+    if (bestDelta < 0) {
+      nonImprovingMovesUsed = 0;
+    } else {
+      nonImprovingMovesUsed += 1;
+      if (nonImprovingMovesUsed > MAX_NON_IMPROVING_MOVES) break;
+    }
+
     pairScore += bestDelta;
   }
 
