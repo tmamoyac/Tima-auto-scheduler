@@ -183,7 +183,7 @@ async function main() {
   // 5) Rotations
   const { data: sourceRotations, error: rotErr } = await supabase
     .from("rotations")
-    .select("id, name, capacity_per_month, eligible_pgy_min, eligible_pgy_max, is_consult, is_transplant, is_primary_site")
+    .select("id, name, capacity_per_month, eligible_pgy_min, eligible_pgy_max, is_consult, is_back_to_back_consult_blocker, is_transplant, is_primary_site")
     .eq("program_id", sourceId)
     .order("name");
   if (rotErr) throw rotErr;
@@ -195,6 +195,7 @@ async function main() {
     eligible_pgy_min: r.eligible_pgy_min ?? 1,
     eligible_pgy_max: r.eligible_pgy_max ?? 5,
     is_consult: r.is_consult === true,
+    is_back_to_back_consult_blocker: r.is_back_to_back_consult_blocker === true,
     is_transplant: r.is_transplant === true,
     is_primary_site: r.is_primary_site === true,
   }));

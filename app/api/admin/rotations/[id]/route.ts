@@ -31,6 +31,8 @@ export async function PATCH(
   if (body.eligible_pgy_max !== undefined)
     updates.eligible_pgy_max = Number(body.eligible_pgy_max);
   if (body.is_consult !== undefined) updates.is_consult = Boolean(body.is_consult);
+  if (body.is_back_to_back_consult_blocker !== undefined)
+    updates.is_back_to_back_consult_blocker = Boolean(body.is_back_to_back_consult_blocker);
   if (body.is_transplant !== undefined) updates.is_transplant = Boolean(body.is_transplant);
   if (body.is_primary_site !== undefined) updates.is_primary_site = Boolean(body.is_primary_site);
   if (Object.keys(updates).length === 0) {

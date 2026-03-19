@@ -13,6 +13,7 @@ type Rotation = {
   eligible_pgy_min: number;
   eligible_pgy_max: number;
   is_consult?: boolean;
+  is_back_to_back_consult_blocker?: boolean;
   is_transplant?: boolean;
   is_primary_site?: boolean;
 };
@@ -40,6 +41,7 @@ export function RotationsSection({
     eligible_pgy_min: 1,
     eligible_pgy_max: 3,
     is_consult: false,
+    is_back_to_back_consult_blocker: false,
     is_transplant: false,
     is_primary_site: false,
   });
@@ -80,7 +82,16 @@ export function RotationsSection({
   const openAdd = () => {
     setEditing(null);
     setAdding(true);
-    setForm({ name: "", capacity_per_month: 4, eligible_pgy_min: 1, eligible_pgy_max: 3, is_consult: false, is_transplant: false, is_primary_site: false });
+    setForm({
+      name: "",
+      capacity_per_month: 4,
+      eligible_pgy_min: 1,
+      eligible_pgy_max: 3,
+      is_consult: false,
+      is_back_to_back_consult_blocker: false,
+      is_transplant: false,
+      is_primary_site: false,
+    });
   };
 
   const openEdit = (r: Rotation) => {
@@ -92,6 +103,7 @@ export function RotationsSection({
       eligible_pgy_min: r.eligible_pgy_min,
       eligible_pgy_max: r.eligible_pgy_max,
       is_consult: r.is_consult === true,
+      is_back_to_back_consult_blocker: r.is_back_to_back_consult_blocker === true,
       is_transplant: r.is_transplant === true,
       is_primary_site: r.is_primary_site === true,
     });
@@ -190,6 +202,11 @@ export function RotationsSection({
                         Consult
                       </span>
                     )}
+                    {r.is_back_to_back_consult_blocker && (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-100">
+                        Strenuous consult
+                      </span>
+                    )}
                     {r.is_transplant && (
                       <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
                         Transplant
@@ -267,6 +284,15 @@ export function RotationsSection({
                 <label className="flex items-center gap-1.5 text-sm">
                   <input
                     type="checkbox"
+                    checked={form.is_back_to_back_consult_blocker}
+                    onChange={(e) => setForm((f) => ({ ...f, is_back_to_back_consult_blocker: e.target.checked }))}
+                    className="rounded"
+                  />
+                  Strenuous consult (blocks back-to-back)
+                </label>
+                <label className="flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
                     checked={form.is_transplant}
                     onChange={(e) => setForm((f) => ({ ...f, is_transplant: e.target.checked }))}
                     className="rounded"
@@ -333,6 +359,7 @@ export function RotationsSection({
                 <th className="border border-gray-300 bg-gray-100 p-2 text-left">Capacity/month</th>
                 <th className="border border-gray-300 bg-gray-100 p-2 text-left">Eligible PGY</th>
                 <th className="border border-gray-300 bg-gray-100 p-2 text-left">Consult</th>
+                <th className="border border-gray-300 bg-gray-100 p-2 text-left">Strenuous consult blocker</th>
                 <th className="border border-gray-300 bg-gray-100 p-2 text-left">Transplant</th>
                 <th className="border border-gray-300 bg-gray-100 p-2 text-left">Primary site</th>
                 <th className="border border-gray-300 bg-gray-100 p-2 text-left">Actions</th>
@@ -347,6 +374,9 @@ export function RotationsSection({
                     {r.eligible_pgy_min}–{r.eligible_pgy_max}
                   </td>
                   <td className="border border-gray-300 p-2">{r.is_consult ? "Yes" : "No"}</td>
+                  <td className="border border-gray-300 p-2">
+                    {r.is_back_to_back_consult_blocker ? "Yes" : "No"}
+                  </td>
                   <td className="border border-gray-300 p-2">{r.is_transplant ? "Yes" : "No"}</td>
                   <td className="border border-gray-300 p-2">{r.is_primary_site ? "Yes" : "No"}</td>
                   <td className="border border-gray-300 p-2">
@@ -425,6 +455,17 @@ export function RotationsSection({
                 <label className="flex items-center gap-1.5 text-sm">
                   <input
                     type="checkbox"
+                    checked={form.is_back_to_back_consult_blocker}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, is_back_to_back_consult_blocker: e.target.checked }))
+                    }
+                    className="rounded"
+                  />
+                  Strenuous consult (blocks back-to-back)
+                </label>
+                <label className="flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
                     checked={form.is_transplant}
                     onChange={(e) => setForm((f) => ({ ...f, is_transplant: e.target.checked }))}
                     className="rounded"
@@ -454,7 +495,16 @@ export function RotationsSection({
                   onClick={() => {
                     setEditing(null);
                     setAdding(false);
-                    setForm({ name: "", capacity_per_month: 4, eligible_pgy_min: 1, eligible_pgy_max: 3, is_consult: false, is_transplant: false, is_primary_site: false });
+                    setForm({
+                      name: "",
+                      capacity_per_month: 4,
+                      eligible_pgy_min: 1,
+                      eligible_pgy_max: 3,
+                      is_consult: false,
+                      is_back_to_back_consult_blocker: false,
+                      is_transplant: false,
+                      is_primary_site: false,
+                    });
                   }}
                 >
                   Cancel

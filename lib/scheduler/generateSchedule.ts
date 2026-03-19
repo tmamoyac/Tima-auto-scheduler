@@ -16,6 +16,7 @@ type Rotation = {
   eligible_pgy_min: number;
   eligible_pgy_max: number;
   is_consult?: boolean;
+  is_back_to_back_consult_blocker?: boolean;
   is_transplant?: boolean;
   is_primary_site?: boolean;
 };
@@ -125,7 +126,7 @@ async function loadSchedulerStaticData({
   const { data: rotations, error: rotationsErr } = await supabaseAdmin
     .from("rotations")
     .select(
-      "id, program_id, name, capacity_per_month, eligible_pgy_min, eligible_pgy_max, is_consult, is_transplant, is_primary_site"
+      "id, program_id, name, capacity_per_month, eligible_pgy_min, eligible_pgy_max, is_consult, is_back_to_back_consult_blocker, is_transplant, is_primary_site"
     )
     .eq("program_id", programId);
   if (rotationsErr) throw rotationsErr;
@@ -248,14 +249,24 @@ async function buildScheduleVariation({
     residentReqByResident,
   } = staticData;
 
-  const consultRotationIds = new Set<string>();
+  const consultRotationIdsForVacation = new Set<string>();
+  const backToBackBlockerRotationIds = new Set<string>();
   const transplantRotationIds = new Set<string>();
   const primarySiteRotationIds = new Set<string>();
   for (const rot of rotationsList) {
-    if ((rot as Rotation & { is_consult?: boolean }).is_consult) consultRotationIds.add(rot.id);
+    if ((rot as Rotation & { is_consult?: boolean }).is_consult) consultRotationIdsForVacation.add(rot.id);
+    if (
+      (rot as Rotation & { is_back_to_back_consult_blocker?: boolean }).is_back_to_back_consult_blocker
+    )
+      backToBackBlockerRotationIds.add(rot.id);
     if ((rot as Rotation & { is_transplant?: boolean }).is_transplant) transplantRotationIds.add(rot.id);
     if ((rot as Rotation & { is_primary_site?: boolean }).is_primary_site) primarySiteRotationIds.add(rot.id);
   }
+
+  // Backward compatibility: if no blocker rotations are configured, fall back to treating all consult rotations
+  // as the blocker set for back-to-back minimization/audit.
+  const consultRotationIdsForBackToBack =
+    backToBackBlockerRotationIds.size > 0 ? backToBackBlockerRotationIds : consultRotationIdsForVacation;
 
   const vacationSet = new Set<string>();
   for (const month of monthsList) {
@@ -353,7 +364,7 @@ async function buildScheduleVariation({
       if (!ruleRotId) continue;
       const onVac = vacationSet.has(residentMonthKey(resident.id, month.id));
       if (onVac && !noConsultWhenVacationInMonth) continue;
-      if (onVac && consultRotationIds.has(ruleRotId)) continue;
+      if (onVac && consultRotationIdsForVacation.has(ruleRotId)) continue;
       const ruleRot = rotationById.get(ruleRotId);
       if (!ruleRot) continue;
       if ((capacity.get(capKey(month.id, ruleRot.id)) ?? 0) <= 0) continue;
@@ -399,7 +410,7 @@ async function buildScheduleVariation({
           if ((required.get(reqKey(res.id, rot.id)) ?? 0) <= 0) return false;
           if (res.pgy < rot.eligible_pgy_min || res.pgy > rot.eligible_pgy_max) return false;
           const onVac = vacationSet.has(residentMonthKey(res.id, month.id));
-          if (onVac && noConsultWhenVacationInMonth && consultRotationIds.has(rot.id)) return false;
+          if (onVac && noConsultWhenVacationInMonth && consultRotationIdsForVacation.has(rot.id)) return false;
           if (
             mi === 0 &&
             requirePgyStartAtPrimarySite &&
@@ -463,7 +474,7 @@ async function buildScheduleVariation({
         .filter((r) => {
           if (resident.pgy < r.eligible_pgy_min || resident.pgy > r.eligible_pgy_max) return false;
           if ((capacity.get(capKey(month.id, r.id)) ?? 0) <= 0) return false;
-          if (onVac && noConsultWhenVacationInMonth && consultRotationIds.has(r.id)) return false;
+          if (onVac && noConsultWhenVacationInMonth && consultRotationIdsForVacation.has(r.id)) return false;
           return (required.get(reqKey(resident.id, r.id)) ?? 0) > 0;
         })
         .sort((a, b) => {
@@ -916,7 +927,12 @@ async function buildScheduleVariation({
   const pairViolationCount = (rotA: string | null, rotB: string | null): number => {
     if (!rotA || !rotB) return 0;
     let c = 0;
-    if (avoidBackToBackConsult && consultRotationIds.has(rotA) && consultRotationIds.has(rotB)) c += 1;
+    if (
+      avoidBackToBackConsult &&
+      consultRotationIdsForBackToBack.has(rotA) &&
+      consultRotationIdsForBackToBack.has(rotB)
+    )
+      c += 1;
     if (avoidBackToBackTransplant && transplantRotationIds.has(rotA) && transplantRotationIds.has(rotB)) c += 1;
     return c;
   };
@@ -1109,9 +1125,9 @@ async function buildScheduleVariation({
         const prevPrevRotId = assignmentLookup.get(residentMonthKey(res.id, prevPrevMId));
         if (
           prevPrevRotId &&
-          consultRotationIds.has(prevPrevRotId) &&
-          consultRotationIds.has(prevRotId) &&
-          consultRotationIds.has(currRotId)
+          consultRotationIdsForBackToBack.has(prevPrevRotId) &&
+          consultRotationIdsForBackToBack.has(prevRotId) &&
+          consultRotationIdsForBackToBack.has(currRotId)
         ) {
           const a = rotationById.get(prevPrevRotId)?.name ?? prevPrevRotId;
           const b = rotationById.get(prevRotId)?.name ?? prevRotId;
@@ -1123,7 +1139,11 @@ async function buildScheduleVariation({
           });
         }
       }
-      if (avoidBackToBackConsult && consultRotationIds.has(prevRotId) && consultRotationIds.has(currRotId)) {
+      if (
+        avoidBackToBackConsult &&
+        consultRotationIdsForBackToBack.has(prevRotId) &&
+        consultRotationIdsForBackToBack.has(currRotId)
+      ) {
         const prevName = rotationById.get(prevRotId)?.name ?? "Consult";
         const currName = rotationById.get(currRotId)?.name ?? "Consult";
         audit.softRuleViolations.push({

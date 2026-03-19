@@ -238,7 +238,12 @@ export function SchedulerPreferencesSection({ programId: programIdProp }: { prog
 
   const rules: { id: string; label: string; checked: boolean; onChange: (checked: boolean) => void }[] = [
     { id: "transplant", label: "Avoid back-to-back transplant months", checked: avoidBackToBackTransplant, onChange: handleAvoidBackToBackTransplantToggle },
-    { id: "consult", label: "Avoid back-to-back consult months", checked: avoidBackToBackConsult, onChange: handleAvoidBackToBackToggle },
+    {
+      id: "consult",
+      label: "Avoid back-to-back strenuous consult rotations",
+      checked: avoidBackToBackConsult,
+      onChange: handleAvoidBackToBackToggle,
+    },
     { id: "no-consult-vacation", label: "Do not assign consult in months when resident has vacation", checked: noConsultWhenVacationInMonth, onChange: handleNoConsultWhenVacationToggle },
     { id: "primary-site-long-vacation", label: "Prefer primary-site rotations for residents with more than one week vacation", checked: preferPrimarySiteForLongVacation, onChange: handlePreferPrimarySiteForLongVacationToggle },
   ];
