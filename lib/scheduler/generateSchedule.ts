@@ -1331,7 +1331,7 @@ export async function generateSchedule({
   // When avoiding back-to-back strenuous consults, increase retry budget to
   // give the in-memory repair/minimizer enough opportunity to discover a
   // zero-violation arrangement (if one exists).
-  const maxAttempts = staticData.avoidBackToBackConsult ? 120 : 60;
+  const maxAttempts = staticData.avoidBackToBackConsult ? 300 : 120;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const seed = (baseSeed + attempt) >>> 0;
