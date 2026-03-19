@@ -1304,6 +1304,18 @@ export async function generateSchedule({
       }
     | null = null;
   let bestSoft = Infinity;
+  let bestAny:
+    | {
+        assignmentRows: { resident_id: string; month_id: string; rotation_id: string | null }[];
+        audit: ScheduleAudit;
+        attempt: number;
+        seed: number;
+        requirementViolations: number;
+        consultBackToBackViolations: number;
+        transplantBackToBackViolations: number;
+        softCount: number;
+      }
+    | null = null;
 
   const isBetterFallback = (
     next: {
@@ -1337,9 +1349,6 @@ export async function generateSchedule({
     const seed = (baseSeed + attempt) >>> 0;
     const { assignmentRows, audit } = await buildScheduleVariation({ staticData, seed });
 
-    const hardOk = audit.requirementViolations.length === 0;
-    if (!hardOk) continue;
-
     const consultBackToBackViolations = audit.softRuleViolations.filter((v) =>
       v.rule.startsWith("Back-to-back consult:")
     ).length;
@@ -1347,9 +1356,41 @@ export async function generateSchedule({
       v.rule.startsWith("Back-to-back transplant:")
     ).length;
 
+    const reqViolCount = audit.requirementViolations.length;
+    const softCount = audit.softRuleViolations.length;
+
+    // Always keep a global best candidate so generation can still return a schedule
+    // with warning when strict constraints are infeasible within budget.
+    if (
+      !bestAny ||
+      reqViolCount < bestAny.requirementViolations ||
+      (reqViolCount === bestAny.requirementViolations &&
+        consultBackToBackViolations < bestAny.consultBackToBackViolations) ||
+      (reqViolCount === bestAny.requirementViolations &&
+        consultBackToBackViolations === bestAny.consultBackToBackViolations &&
+        transplantBackToBackViolations < bestAny.transplantBackToBackViolations) ||
+      (reqViolCount === bestAny.requirementViolations &&
+        consultBackToBackViolations === bestAny.consultBackToBackViolations &&
+        transplantBackToBackViolations === bestAny.transplantBackToBackViolations &&
+        softCount < bestAny.softCount)
+    ) {
+      bestAny = {
+        assignmentRows,
+        audit,
+        attempt,
+        seed,
+        requirementViolations: reqViolCount,
+        consultBackToBackViolations,
+        transplantBackToBackViolations,
+        softCount,
+      };
+    }
+
+    const hardOk = reqViolCount === 0;
+    if (!hardOk) continue;
+
     const strictPairOk = consultBackToBackViolations === 0 && transplantBackToBackViolations === 0;
 
-    const softCount = audit.softRuleViolations.length;
     // Strict acceptance: strict back-to-back counts must be 0 AND total soft violations must be <= 5.
     if (strictPairOk && softCount <= 5) {
       const scheduleVersionId = await persistSchedule({
@@ -1400,6 +1441,19 @@ export async function generateSchedule({
       assignmentRows: bestHard.assignmentRows,
     });
     return { scheduleVersionId, audit: bestHard.audit };
+  }
+
+  // Final fallback: still return the best attempt found (closest to constraints)
+  // instead of hard-failing generation.
+  if (bestAny) {
+    const scheduleVersionId = await persistSchedule({
+      supabaseAdmin,
+      academicYearId,
+      seed: bestAny.seed,
+      attempt: bestAny.attempt,
+      assignmentRows: bestAny.assignmentRows,
+    });
+    return { scheduleVersionId, audit: bestAny.audit };
   }
 
   throw new Error("SCHEDULE_CONSTRAINTS_UNSATISFIABLE");
