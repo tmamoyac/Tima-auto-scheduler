@@ -33,13 +33,11 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
       const softViol = parsed.audit.softRuleViolations.length;
       if (reqViol > 0) {
         setMessage({ type: "error", text: "Hard requirements were not met (unexpected)." });
-      } else if (softViol > 5) {
+      } else if (softViol > 0) {
         setMessage({
           type: "success",
-          text: "Schedule created: hard requirements met, but soft-rule threshold of 5 could not be reached.",
+          text: "Schedule created with soft-rule warnings (see below).",
         });
-      } else if (softViol > 0) {
-        setMessage({ type: "success", text: "Schedule created with soft-rule warnings (see below)." });
       } else {
         setMessage({ type: "success", text: "Schedule created! All requirements met." });
       }
@@ -105,25 +103,6 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
       if (reqViol > 0) {
         setAudit(a);
         setMessage({ type: "error", text: "Hard requirements were not met (unexpected)." });
-        return;
-      }
-
-      if (softViol > 5) {
-        setAudit(a);
-        setMessage({
-          type: "success",
-          text: "Schedule created: hard requirements met, but soft-rule threshold of 5 could not be reached. Reloading…",
-        });
-        try {
-          sessionStorage.setItem(
-            "scheduleAuditReport",
-            JSON.stringify({ programId, audit: a, ts: Date.now() })
-          );
-        } catch {
-          // ignore
-        }
-        if (redirectUrl) window.location.assign(redirectUrl);
-        else window.location.reload();
         return;
       }
 

@@ -1239,6 +1239,15 @@ async function buildScheduleVariation({
   return { assignmentRows, audit };
 }
 
+/** Program requires zero back-to-back strenuous (blocker) consult months; generation failed to find one in time. */
+export const SCHEDULE_ERROR_STRENUOUS_B2B_UNSATISFIABLE = "STRENUOUS_B2B_UNSATISFIABLE";
+
+export const SCHEDULE_ERROR_REQUIREMENTS_UNSATISFIABLE = "SCHEDULE_CONSTRAINTS_UNSATISFIABLE";
+
+/** User-facing hint when {@link SCHEDULE_ERROR_STRENUOUS_B2B_UNSATISFIABLE} is thrown. */
+export const STRENUOUS_B2B_UNSATISFIABLE_MESSAGE =
+  "Could not find a schedule without back-to-back strenuous consult months within the search time limit. Try increasing capacity for those rotations, reducing required months, easing fixed assignment rules, or confirming only truly strenuous rotations (e.g. UCI Orange) are marked as back-to-back consult blockers—not every consult rotation.";
+
 /** Counts back-to-back consult rows for rotations in the strenuous/blocker set (or all consults if fallback). */
 function countStrenuousConsultBackToBackViolations(audit: ScheduleAudit): number {
   return audit.softRuleViolations.filter(
@@ -1382,6 +1391,8 @@ export async function generateSchedule({
   };
 
   const staticData = await loadSchedulerStaticData({ supabaseAdmin, academicYearId });
+  /** When true, we never persist a schedule that has any strenuous (blocker↔blocker) consult adjacency. */
+  const enforceStrenuousB2BMaxZero = staticData.avoidBackToBackConsult === true;
 
   // When avoiding back-to-back strenuous consults, increase retry budget to
   // give the in-memory repair/minimizer enough opportunity to discover a
@@ -1389,6 +1400,8 @@ export async function generateSchedule({
   const maxAttempts = staticData.avoidBackToBackConsult ? 80 : 40;
   // Hard wall-clock budget so generation always returns promptly with best fallback.
   const deadlineTs = Date.now() + (staticData.avoidBackToBackConsult ? 12000 : 8000);
+
+  let sawReqOkWithStrenuousViolations = false;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (Date.now() >= deadlineTs) break;
@@ -1403,40 +1416,78 @@ export async function generateSchedule({
     const reqViolCount = audit.requirementViolations.length;
     const softCount = audit.softRuleViolations.length;
 
-    // Always keep a global best candidate so generation can still return a schedule
-    // with warning when strict constraints are infeasible within budget.
-    if (
-      !bestAny ||
-      reqViolCount < bestAny.requirementViolations ||
-      (reqViolCount === bestAny.requirementViolations &&
-        strenuousConsultBackToBackViolations < bestAny.strenuousConsultBackToBackViolations) ||
-      (reqViolCount === bestAny.requirementViolations &&
-        strenuousConsultBackToBackViolations === bestAny.strenuousConsultBackToBackViolations &&
-        transplantBackToBackViolations < bestAny.transplantBackToBackViolations) ||
-      (reqViolCount === bestAny.requirementViolations &&
-        strenuousConsultBackToBackViolations === bestAny.strenuousConsultBackToBackViolations &&
-        transplantBackToBackViolations === bestAny.transplantBackToBackViolations &&
-        softCount < bestAny.softCount)
-    ) {
-      bestAny = {
-        assignmentRows,
-        audit,
-        attempt,
-        seed,
-        requirementViolations: reqViolCount,
-        strenuousConsultBackToBackViolations,
-        transplantBackToBackViolations,
-        softCount,
-      };
+    // When we do not enforce strenuous as a hard gate, keep a global best candidate for fallbacks.
+    if (!enforceStrenuousB2BMaxZero) {
+      if (
+        !bestAny ||
+        reqViolCount < bestAny.requirementViolations ||
+        (reqViolCount === bestAny.requirementViolations &&
+          strenuousConsultBackToBackViolations < bestAny.strenuousConsultBackToBackViolations) ||
+        (reqViolCount === bestAny.requirementViolations &&
+          strenuousConsultBackToBackViolations === bestAny.strenuousConsultBackToBackViolations &&
+          transplantBackToBackViolations < bestAny.transplantBackToBackViolations) ||
+        (reqViolCount === bestAny.requirementViolations &&
+          strenuousConsultBackToBackViolations === bestAny.strenuousConsultBackToBackViolations &&
+          transplantBackToBackViolations === bestAny.transplantBackToBackViolations &&
+          softCount < bestAny.softCount)
+      ) {
+        bestAny = {
+          assignmentRows,
+          audit,
+          attempt,
+          seed,
+          requirementViolations: reqViolCount,
+          strenuousConsultBackToBackViolations,
+          transplantBackToBackViolations,
+          softCount,
+        };
+      }
     }
 
     const hardOk = reqViolCount === 0;
     if (!hardOk) continue;
 
+    if (enforceStrenuousB2BMaxZero) {
+      if (strenuousConsultBackToBackViolations === 0) {
+        const scheduleVersionId = await persistSchedule({
+          supabaseAdmin,
+          academicYearId,
+          seed,
+          attempt,
+          assignmentRows,
+        });
+        return { scheduleVersionId, audit };
+      }
+      sawReqOkWithStrenuousViolations = true;
+      const nextFallback = {
+        strenuousConsultBackToBackViolations,
+        transplantBackToBackViolations,
+        softCount,
+      };
+      const prevFallback = bestHard
+        ? {
+            strenuousConsultBackToBackViolations: bestHard.strenuousConsultBackToBackViolations,
+            transplantBackToBackViolations: bestHard.transplantBackToBackViolations,
+            softCount: bestSoft,
+          }
+        : null;
+      if (!prevFallback || isBetterFallback(nextFallback, prevFallback)) {
+        bestSoft = softCount;
+        bestHard = {
+          assignmentRows,
+          audit,
+          attempt,
+          seed,
+          strenuousConsultBackToBackViolations,
+          transplantBackToBackViolations,
+        };
+      }
+      continue;
+    }
+
     const strictPairOk =
       strenuousConsultBackToBackViolations === 0 && transplantBackToBackViolations === 0;
 
-    // Strict acceptance: strict back-to-back counts must be 0 AND total soft violations must be <= 5.
     if (strictPairOk && softCount <= 5) {
       const scheduleVersionId = await persistSchedule({
         supabaseAdmin,
@@ -1448,8 +1499,6 @@ export async function generateSchedule({
       return { scheduleVersionId, audit };
     }
 
-    // Track the best hard-valid schedule (even if strict back-to-back is not 0).
-    // We'll use this as the fallback if strict back-to-back constraints are infeasible.
     const nextFallback = {
       strenuousConsultBackToBackViolations,
       transplantBackToBackViolations,
@@ -1476,7 +1525,13 @@ export async function generateSchedule({
     }
   }
 
-  // Fallback: hard requirements are satisfiable, but strict back-to-back counts are not.
+  if (enforceStrenuousB2BMaxZero) {
+    if (sawReqOkWithStrenuousViolations) {
+      throw new Error(`${SCHEDULE_ERROR_STRENUOUS_B2B_UNSATISFIABLE}: ${STRENUOUS_B2B_UNSATISFIABLE_MESSAGE}`);
+    }
+    throw new Error(SCHEDULE_ERROR_REQUIREMENTS_UNSATISFIABLE);
+  }
+
   if (bestHard) {
     const scheduleVersionId = await persistSchedule({
       supabaseAdmin,
@@ -1488,8 +1543,6 @@ export async function generateSchedule({
     return { scheduleVersionId, audit: bestHard.audit };
   }
 
-  // Final fallback: still return the best attempt found (closest to constraints)
-  // instead of hard-failing generation.
   if (bestAny) {
     const scheduleVersionId = await persistSchedule({
       supabaseAdmin,
@@ -1501,5 +1554,5 @@ export async function generateSchedule({
     return { scheduleVersionId, audit: bestAny.audit };
   }
 
-  throw new Error("SCHEDULE_CONSTRAINTS_UNSATISFIABLE");
+  throw new Error(SCHEDULE_ERROR_REQUIREMENTS_UNSATISFIABLE);
 }
