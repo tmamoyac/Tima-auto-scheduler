@@ -807,7 +807,7 @@ async function buildScheduleVariation({
   };
 
   // First repair attempt (soft rules ignored for hard requirements).
-  runRepairPass(5);
+  runRepairPass(12);
 
   // ---- Hard requirement verification gate (must be zero unmet) ----
   const assignedCountForGate = new Map<string, number>();
@@ -829,49 +829,12 @@ async function buildScheduleVariation({
   // If anything is still unmet, rerun the hard-requirement repair pass with a higher cap
   // before we even start minimizing soft rule violations.
   if (hasUnmetRequirements) {
-    runRepairPass(5);
+    runRepairPass(12);
   }
 
-  // Phase F: final hard-requirement closure (capacity-safe swaps)
-  // If we still have a small number of unmet requirements, close them by:
-  // - Directly placing needed rotations when the rotation has remaining capacity in the month, or
-  // - When a rotation's capacity is full, swapping with another resident who is currently
-  //   over-assigned for that needed rotation in the same month.
-  //
-  // Soft rules are ignored here so that hard requirements always take precedence.
-
-  // Rebuild capacity from current `assignmentRows` to avoid any drift from prior repair phases.
-  // `capacity` in this file represents remaining capacity per (month, rotation).
-  for (const month of monthsList) {
-    for (const rot of rotationsList) {
-      capacity.set(capKey(month.id, rot.id), rot.capacity_per_month);
-    }
-  }
-  for (const row of assignmentRows) {
-    if (!row.rotation_id) continue;
-    const ck = capKey(row.month_id, row.rotation_id);
-    capacity.set(ck, (capacity.get(ck) ?? 0) - 1);
-  }
-
+  // Phase F: final hard-requirement closure (capacity-safe swaps). Re-runnable after vacation strip.
   const residentById = new Map<string, Resident>();
   for (const r of residentsList) residentById.set(r.id, r);
-
-  const assignedCountForEnforce = new Map<string, number>();
-  for (const row of assignmentRows) {
-    if (!row.rotation_id) continue;
-    const k = reqKey(row.resident_id, row.rotation_id);
-    assignedCountForEnforce.set(k, (assignedCountForEnforce.get(k) ?? 0) + 1);
-  }
-
-  // Map monthId_rotationId -> indices of assignmentRows occupying that rotation.
-  const monthRotationToIndices = new Map<string, number[]>();
-  for (let idx = 0; idx < assignmentRows.length; idx++) {
-    const row = assignmentRows[idx];
-    if (!row.rotation_id) continue;
-    const k = capKey(row.month_id, row.rotation_id);
-    if (!monthRotationToIndices.has(k)) monthRotationToIndices.set(k, []);
-    monthRotationToIndices.get(k)!.push(idx);
-  }
 
   const splitReqKey = (k: string): { residentId: string; rotationId: string } => {
     const u = k.indexOf("_");
@@ -879,8 +842,36 @@ async function buildScheduleVariation({
     return { residentId: k.slice(0, u), rotationId: k.slice(u + 1) };
   };
 
-  const enforceMaxIters = 20000;
-  for (let iter = 0; iter < enforceMaxIters; iter++) {
+  const runPhaseFEnforce = () => {
+    for (const month of monthsList) {
+      for (const rot of rotationsList) {
+        capacity.set(capKey(month.id, rot.id), rot.capacity_per_month);
+      }
+    }
+    for (const row of assignmentRows) {
+      if (!row.rotation_id) continue;
+      const ck = capKey(row.month_id, row.rotation_id);
+      capacity.set(ck, (capacity.get(ck) ?? 0) - 1);
+    }
+
+    const assignedCountForEnforce = new Map<string, number>();
+    for (const row of assignmentRows) {
+      if (!row.rotation_id) continue;
+      const k = reqKey(row.resident_id, row.rotation_id);
+      assignedCountForEnforce.set(k, (assignedCountForEnforce.get(k) ?? 0) + 1);
+    }
+
+    const monthRotationToIndices = new Map<string, number[]>();
+    for (let idx = 0; idx < assignmentRows.length; idx++) {
+      const row = assignmentRows[idx];
+      if (!row.rotation_id) continue;
+      const k = capKey(row.month_id, row.rotation_id);
+      if (!monthRotationToIndices.has(k)) monthRotationToIndices.set(k, []);
+      monthRotationToIndices.get(k)!.push(idx);
+    }
+
+    const enforceMaxIters = 20000;
+    for (let iter = 0; iter < enforceMaxIters; iter++) {
     let deficitKey: string | null = null;
     let bestGap = -Infinity;
     for (const [k, init] of initialRequired) {
@@ -986,6 +977,9 @@ async function buildScheduleVariation({
 
     if (!applied) continue;
   }
+  };
+
+  runPhaseFEnforce();
 
   // Safety net: repair/enforce phases may still place consult/strenuous months on vacation.
   // Strip those assignments and re-run repair so consult never remains on a vacation month.
@@ -1019,6 +1013,8 @@ async function buildScheduleVariation({
   };
 
   stripConsultAssignmentsOnVacationMonths();
+  runRepairPass(12);
+  runPhaseFEnforce();
   runRepairPass(12);
 
   // Phase D: score-based minimizer for the soft violations we report in the audit UI.
@@ -1233,6 +1229,8 @@ async function buildScheduleVariation({
   }
 
   stripConsultAssignmentsOnVacationMonths();
+  runRepairPass(12);
+  runPhaseFEnforce();
   runRepairPass(12);
 
   // Post-generation audit
