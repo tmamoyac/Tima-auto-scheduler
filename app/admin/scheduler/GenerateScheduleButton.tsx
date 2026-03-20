@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/apiFetch";
 import {
   formatStrenuousBestEffortBanner,
+  type FeasibilityReport,
   type ScheduleAudit,
   type StrenuousConsultB2bBestEffortMeta,
 } from "@/lib/scheduler/generateSchedule";
@@ -13,6 +14,7 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [audit, setAudit] = useState<ScheduleAudit | null>(null);
+  const [feasibilityReport, setFeasibilityReport] = useState<FeasibilityReport | null>(null);
   const [strenuousBestEffortBanner, setStrenuousBestEffortBanner] = useState<string | null>(null);
   const searchParams = useSearchParams();
 
@@ -31,6 +33,8 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
         audit: ScheduleAudit;
         ts: number;
         strenuousBestEffortBanner?: string | null;
+        feasibilityReport?: FeasibilityReport | null;
+        requirementsPartial?: boolean;
       };
       if (!parsed || parsed.programId !== programId) return;
 
@@ -39,10 +43,16 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
 
       setAudit(parsed.audit);
       setStrenuousBestEffortBanner(parsed.strenuousBestEffortBanner ?? null);
+      if (parsed.feasibilityReport) setFeasibilityReport(parsed.feasibilityReport);
 
       const reqViol = parsed.audit.requirementViolations.length;
       const softViol = parsed.audit.softRuleViolations.length;
-      if (reqViol > 0) {
+      if (reqViol > 0 && parsed.requirementsPartial) {
+        setMessage({
+          type: "success",
+          text: "Schedule saved as best effort. Review unmet requirements and suggested adjustments below.",
+        });
+      } else if (reqViol > 0) {
         setMessage({ type: "error", text: "Hard requirements were not met (unexpected)." });
       } else if (softViol > 0) {
         setMessage({
@@ -59,10 +69,29 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
     }
   }, [programId]);
 
+  function scheduleAuditPayload(
+    audit: ScheduleAudit,
+    extras: {
+      strenuousBestEffortBanner: string | null;
+      feasibilityReport: FeasibilityReport | null;
+      requirementsPartial?: boolean;
+    }
+  ) {
+    return JSON.stringify({
+      programId,
+      audit,
+      ts: Date.now(),
+      strenuousBestEffortBanner: extras.strenuousBestEffortBanner,
+      feasibilityReport: extras.feasibilityReport ?? undefined,
+      requirementsPartial: extras.requirementsPartial,
+    });
+  }
+
   const handleClick = async () => {
     setLoading(true);
     setMessage(null);
     setAudit(null);
+    setFeasibilityReport(null);
     setStrenuousBestEffortBanner(null);
     try {
       const res = await apiFetch(`/api/scheduler/generate?programId=${encodeURIComponent(programId)}`, {
@@ -75,6 +104,7 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
         audit?: ScheduleAudit;
         strenuousConsultB2bBestEffort?: StrenuousConsultB2bBestEffortMeta;
         requirementsPartial?: boolean;
+        feasibilityReport?: FeasibilityReport;
       } = {};
       if (contentType.includes("application/json")) {
         data = await res.json();
@@ -95,6 +125,7 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
         }
       }
       if (!res.ok) {
+        if (data.feasibilityReport) setFeasibilityReport(data.feasibilityReport);
         setMessage({ type: "error", text: data.error || "Failed to generate schedule" });
         return;
       }
@@ -121,22 +152,22 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
       const effort = data.strenuousConsultB2bBestEffort;
       const effortBanner = effort ? formatStrenuousBestEffortBanner(effort) : null;
       if (effortBanner) setStrenuousBestEffortBanner(effortBanner);
+      if (data.feasibilityReport) setFeasibilityReport(data.feasibilityReport);
 
       if (reqViol > 0) {
         setAudit(a);
         if (data.requirementsPartial) {
           setMessage({
             type: "success",
-            text: "Schedule saved as best effort: some rotation requirements still don’t match (see audit). Adjust capacity/requirements or fix manually. Reloading…",
+            text: "Schedule saved as best effort: some rotation requirements still don’t match. See “What to adjust” below, then fix in Setup or manually. Reloading…",
           });
           try {
             sessionStorage.setItem(
               "scheduleAuditReport",
-              JSON.stringify({
-                programId,
-                audit: a,
-                ts: Date.now(),
+              scheduleAuditPayload(a, {
                 strenuousBestEffortBanner: effortBanner,
+                feasibilityReport: data.feasibilityReport ?? null,
+                requirementsPartial: true,
               })
             );
           } catch {
@@ -161,11 +192,9 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
         try {
           sessionStorage.setItem(
             "scheduleAuditReport",
-            JSON.stringify({
-              programId,
-              audit: a,
-              ts: Date.now(),
+            scheduleAuditPayload(a, {
               strenuousBestEffortBanner: effortBanner,
+              feasibilityReport: data.feasibilityReport ?? null,
             })
           );
         } catch {
@@ -206,9 +235,74 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
         )}
       </div>
 
+      {/* Full failure: no audit, but API still returns feasibility hints (e.g. 422). */}
+      {feasibilityReport && !audit && (
+        <div className="mt-3 max-w-2xl rounded-lg border-2 border-sky-400 bg-sky-50 p-4 text-sm text-sky-950">
+          <h3 className="font-semibold text-sky-900 mb-2">How to fix this</h3>
+          <p className="mb-2">{feasibilityReport.summary}</p>
+          {feasibilityReport.suggestions.length > 0 && (
+            <div className="mb-2">
+              <p className="font-medium text-sky-900 mb-1">Try these steps</p>
+              <ul className="list-disc pl-5 space-y-1">
+                {feasibilityReport.suggestions.map((s, i) => (
+                  <li key={i}>{s}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {feasibilityReport.checks.some((c) => !c.ok) && (
+            <div>
+              <p className="font-medium text-sky-900 mb-1">What’s wrong in your setup</p>
+              <ul className="list-disc pl-5 space-y-1">
+                {feasibilityReport.checks
+                  .filter((c) => !c.ok)
+                  .map((c, i) => (
+                    <li key={i}>
+                      <span className="font-medium">{c.label}</span>
+                      {c.detail ? ` — ${c.detail}` : ""}
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
       {audit && (
         <div className="mt-3 max-w-2xl rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm">
           <h3 className="font-semibold text-amber-900 mb-2">Schedule Audit Report</h3>
+
+          {feasibilityReport && (
+            <div className="mb-4 rounded-lg border-2 border-sky-400 bg-sky-50 p-3 text-sky-950">
+              <h4 className="font-semibold text-sky-900 mb-2">How to fix this</h4>
+              <p className="mb-2 text-sm">{feasibilityReport.summary}</p>
+              {feasibilityReport.suggestions.length > 0 && (
+                <div className="mb-2">
+                  <p className="text-sm font-medium text-sky-900 mb-1">Try these steps</p>
+                  <ul className="list-disc pl-5 space-y-1 text-sm">
+                    {feasibilityReport.suggestions.map((s, i) => (
+                      <li key={i}>{s}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {feasibilityReport.checks.some((c) => !c.ok) && (
+                <div>
+                  <p className="text-sm font-medium text-sky-900 mb-1">What’s wrong in your setup</p>
+                  <ul className="list-disc pl-5 space-y-1 text-sm">
+                    {feasibilityReport.checks
+                      .filter((c) => !c.ok)
+                      .map((c, i) => (
+                        <li key={i}>
+                          <span className="font-medium">{c.label}</span>
+                          {c.detail ? ` — ${c.detail}` : ""}
+                        </li>
+                      ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
 
           {strenuousBestEffortBanner && (
             <p className="mb-3 rounded border border-amber-400 bg-amber-100 px-3 py-2 font-medium text-amber-950">

@@ -3,7 +3,11 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { directorAuthErrorResponse } from "@/lib/auth/directorContext";
 import { getProgramContextForRequest, getProgramIdFromRequest } from "@/lib/auth/schedulerContext";
-import { generateSchedule, SCHEDULE_ERROR_REQUIREMENTS_UNSATISFIABLE } from "@/lib/scheduler/generateSchedule";
+import {
+  generateSchedule,
+  SCHEDULE_ERROR_REQUIREMENTS_UNSATISFIABLE,
+  ScheduleUnsatError,
+} from "@/lib/scheduler/generateSchedule";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
@@ -24,6 +28,16 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     const res = directorAuthErrorResponse(err);
     if (res) return jsonError(res.error, res.status);
+    if (err instanceof ScheduleUnsatError) {
+      return NextResponse.json(
+        {
+          error:
+            "We couldn’t build a schedule with your current setup. Read the blue “how to fix this” section below for simple changes to try (usually capacity or requirements).",
+          feasibilityReport: err.feasibilityReport,
+        },
+        { status: 422 }
+      );
+    }
     if (err instanceof Error && err.message === SCHEDULE_ERROR_REQUIREMENTS_UNSATISFIABLE) {
       return jsonError(
         "Unable to generate a schedule that satisfies all rotation requirements within the attempt limit.",

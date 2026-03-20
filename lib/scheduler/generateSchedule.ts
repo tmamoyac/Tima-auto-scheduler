@@ -1434,7 +1434,215 @@ async function buildScheduleVariation({
   return { assignmentRows, audit };
 }
 
+/** Human-readable feasibility / tuning hints when constraints look over-tight or generation struggles. */
+export type FeasibilityReport = {
+  summary: string;
+  suggestions: string[];
+  checks: Array<{ label: string; ok: boolean; detail?: string }>;
+};
+
+function computeInitialRequiredMap(data: LoadedSchedulerStaticData): Map<string, number> {
+  const { residentsList, rotationsList, requirementsList, residentReqByResident } = data;
+  const required = new Map<string, number>();
+  for (const r of residentsList) {
+    const custom = residentReqByResident.get(r.id);
+    if (custom && custom.length > 0) {
+      for (const rot of rotationsList) {
+        required.set(reqKey(r.id, rot.id), 0);
+      }
+      for (const row of custom) {
+        required.set(reqKey(r.id, row.rotation_id), row.min_months_required);
+      }
+    } else {
+      for (const req of requirementsList) {
+        if (req.pgy !== r.pgy) continue;
+        required.set(reqKey(r.id, req.rotation_id), req.min_months_required);
+      }
+    }
+  }
+  return required;
+}
+
+/**
+ * Analyze rotation capacities, PGY rules, vacations, and optional saved audit to suggest parameter changes.
+ * Safe to call with `audit: null` (static checks only).
+ */
+export function buildFeasibilityReport(
+  data: LoadedSchedulerStaticData,
+  audit?: ScheduleAudit | null
+): FeasibilityReport {
+  const {
+    monthsList,
+    residentsList,
+    rotationsList,
+    avoidBackToBackConsult,
+    noConsultWhenVacationInMonth,
+    avoidBackToBackTransplant,
+    vacationRanges,
+  } = data;
+  const required = computeInitialRequiredMap(data);
+  const nMonths = monthsList.length;
+  const checks: FeasibilityReport["checks"] = [];
+  const suggestions: string[] = [];
+  const residentLabel = (r: Resident) =>
+    `${(r.first_name ?? "").trim()} ${(r.last_name ?? "").trim()}`.trim() || r.id;
+
+  // --- Per-resident total required vs months in year ---
+  for (const res of residentsList) {
+    let sumReq = 0;
+    for (const rot of rotationsList) {
+      sumReq += Math.max(0, required.get(reqKey(res.id, rot.id)) ?? 0);
+    }
+    const ok = sumReq <= nMonths;
+    if (!ok) {
+      checks.push({
+        label: `${residentLabel(res)}: too many required rotations`,
+        ok: false,
+        detail: `This resident is required to complete ${sumReq} rotation months, but the year only has ${nMonths} months.`,
+      });
+      suggestions.push(
+        `For ${residentLabel(res)}: lower how many months they must spend on rotations (right now it adds up to ${sumReq}, but there are only ${nMonths} months in the year). Or add more months to this academic year in your setup.`
+      );
+    }
+  }
+
+  // --- PGY eligibility vs requirements (record failures only to keep the list readable) ---
+  for (const res of residentsList) {
+    for (const rot of rotationsList) {
+      const need = required.get(reqKey(res.id, rot.id)) ?? 0;
+      if (need <= 0) continue;
+      const ok = res.pgy >= rot.eligible_pgy_min && res.pgy <= rot.eligible_pgy_max;
+      const rname = rot.name ?? rot.id;
+      if (!ok) {
+        checks.push({
+          label: `${residentLabel(res)} and ${rname} don’t match PGY rules`,
+          ok: false,
+          detail: `${residentLabel(res)} is PGY ${res.pgy}, but ${rname} is only set up for PGY ${rot.eligible_pgy_min}–${rot.eligible_pgy_max}.`,
+        });
+        suggestions.push(
+          `Update either the rotation “who can do this” PGY range for ${rname}, or the requirements so ${residentLabel(res)} (PGY ${res.pgy}) isn’t required on that rotation until the PGY line up.`
+        );
+      }
+    }
+  }
+
+  // --- Rotation supply (capacity × months) vs demand ---
+  for (const rot of rotationsList) {
+    let demand = 0;
+    for (const res of residentsList) {
+      demand += Math.max(0, required.get(reqKey(res.id, rot.id)) ?? 0);
+    }
+    if (demand <= 0) continue;
+    const supply = nMonths > 0 ? nMonths * rot.capacity_per_month : 0;
+    const ok = demand <= supply;
+    const rname = rot.name ?? rot.id;
+    if (!ok) {
+      checks.push({
+        label: `Not enough open spots on ${rname}`,
+        ok: false,
+        detail: `The program needs ${demand} assignment months on ${rname}, but only about ${supply} exist (${rot.capacity_per_month} residents per month × ${nMonths} months).`,
+      });
+      suggestions.push(
+        `For ${rname}: either raise “how many residents per month” (it’s ${rot.capacity_per_month} now), or reduce how many months each person must do on that rotation. You need at least ${demand} total months of spots; you only have about ${supply}.`
+      );
+    }
+  }
+
+  // --- Vacation + consult rule ---
+  const vacationCount = vacationRanges.length;
+  if (noConsultWhenVacationInMonth && vacationCount > 0) {
+    checks.push({
+      label: "Vacation and consult-heavy months",
+      ok: true,
+      detail: `You have ${vacationCount} vacation booking(s) that fall in this year. When “no consult during vacation” is on, consult rotations can’t go in those months.`,
+    });
+    suggestions.push(
+      "Because people can’t be on consult during their vacation month(s), you have fewer months available for consult rotations. You can: allow a few more residents per month on consult services, ask for fewer consult months per person, or turn off “no consult during vacation” temporarily to see if that was the main issue."
+    );
+  }
+
+  // --- Strenuous B2B + transplant spacing ---
+  const strenuousIds = buildStrenuousConsultRotationIds(rotationsList);
+  let strenuousDemand = 0;
+  for (const res of residentsList) {
+    for (const rot of rotationsList) {
+      if (!strenuousIds.has(rot.id)) continue;
+      strenuousDemand += Math.max(0, required.get(reqKey(res.id, rot.id)) ?? 0);
+    }
+  }
+  if (avoidBackToBackConsult && strenuousDemand > 0 && nMonths > 0) {
+    checks.push({
+      label: "Spacing out heavy consult months",
+      ok: true,
+      detail: `The program needs ${strenuousDemand} months on “strenuous consult” rotations in total. Spreading them so none fall back-to-back needs extra free months between them.`,
+    });
+    suggestions.push(
+      "“Avoid back-to-back strenuous consult” makes scheduling harder because pairs of heavy consult months need a gap. Easier options: mark only the heaviest rotations as “blockers,” add one more resident-per-month on those services, shorten how many consult months each person needs, or turn this rule off for one test run to see if spacing was the problem."
+    );
+  }
+  if (avoidBackToBackTransplant) {
+    suggestions.push(
+      "“Avoid back-to-back transplant” is turned on. If things still don’t work, try fewer transplant months per person or more transplant slots per month."
+    );
+  }
+
+  // --- Audit-driven (saved or best attempt) ---
+  if (audit && audit.requirementViolations.length > 0) {
+    const byRot = new Map<string, { short: number; example: string }>();
+    for (const v of audit.requirementViolations) {
+      const prev = byRot.get(v.rotationName) ?? { short: 0, example: v.residentName };
+      const gap = v.required - v.assigned;
+      byRot.set(v.rotationName, {
+        short: prev.short + Math.max(0, gap),
+        example: prev.example,
+      });
+    }
+    for (const [rotName, { short: _s, example }] of byRot) {
+      suggestions.push(
+        `The schedule is still missing time on ${rotName} for someone (for example ${example}). In Setup, either increase how many residents that service can take each month, or reduce how many months of ${rotName} are required—and generate again.`
+      );
+    }
+  }
+
+  // Dedupe suggestions (keep order)
+  const seen = new Set<string>();
+  const uniqueSuggestions = suggestions.filter((s) => {
+    const k = s.slice(0, 80);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+
+  const failedStatic = checks.filter((c) => !c.ok).length;
+  const auditFail = audit ? audit.requirementViolations.length + audit.softRuleViolations.length : 0;
+
+  let summary =
+    failedStatic > 0
+      ? "Something in your setup doesn’t add up yet—like too many required months or PGY rules that don’t match. Fix the items marked below (or follow the steps), then click Generate again."
+      : audit && audit.requirementViolations.length > 0
+        ? "Not everyone got the number of months you required on each rotation. The list below suggests concrete changes in Setup (usually capacity or how many months are required)."
+        : audit && audit.softRuleViolations.length > 0
+          ? "Required month counts are OK, but some “nice-to-have” rules weren’t fully met (for example back-to-back consult or vacation). Try the ideas below or accept the warnings and edit the grid by hand."
+          : "The rules you turned on may be too strict for the number of spots you have. Try the steps below—often raising capacity a little or relaxing one preference fixes it.";
+
+  if (failedStatic === 0 && auditFail === 0 && uniqueSuggestions.length === 0) {
+    summary =
+      "Try giving rotations a bit more capacity, lowering required months, or relaxing options like consult spacing or vacation rules—then generate again.";
+  }
+
+  return { summary, suggestions: uniqueSuggestions, checks };
+}
+
 export const SCHEDULE_ERROR_REQUIREMENTS_UNSATISFIABLE = "SCHEDULE_CONSTRAINTS_UNSATISFIABLE";
+
+export class ScheduleUnsatError extends Error {
+  readonly feasibilityReport: FeasibilityReport;
+  constructor(feasibilityReport: FeasibilityReport) {
+    super(SCHEDULE_ERROR_REQUIREMENTS_UNSATISFIABLE);
+    this.name = "ScheduleUnsatError";
+    this.feasibilityReport = feasibilityReport;
+  }
+}
 
 /**
  * Legacy: global audit-line count threshold; primary goal is now per-resident B2B cap (see {@link StrenuousConsultB2bBestEffortMeta.residentsOverOne}).
@@ -1461,6 +1669,8 @@ export type GenerateScheduleResult = {
   strenuousConsultB2bBestEffort?: StrenuousConsultB2bBestEffortMeta;
   /** Saved the closest match: some rotation month counts still differ from requirements. */
   requirementsPartial?: boolean;
+  /** How to rebalance setup when constraints are tight or partly unmet. */
+  feasibilityReport?: FeasibilityReport;
 };
 
 /** UX copy when a best-effort schedule is returned for strenuous spacing. */
@@ -1576,6 +1786,23 @@ async function persistSchedule({
   }
 
   return scheduleVersionId;
+}
+
+function withFeasibility(
+  staticData: LoadedSchedulerStaticData,
+  audit: ScheduleAudit,
+  partial: Omit<GenerateScheduleResult, "feasibilityReport">
+): GenerateScheduleResult {
+  const noisy =
+    partial.requirementsPartial === true ||
+    partial.strenuousConsultB2bBestEffort != null ||
+    audit.requirementViolations.length > 0 ||
+    audit.softRuleViolations.length > 0;
+  if (!noisy) return partial as GenerateScheduleResult;
+  return {
+    ...partial,
+    feasibilityReport: buildFeasibilityReport(staticData, audit),
+  };
 }
 
 export async function generateSchedule({
@@ -1739,7 +1966,7 @@ export async function generateSchedule({
           attempt,
           assignmentRows,
         });
-        return { scheduleVersionId, audit };
+        return withFeasibility(staticData, audit, { scheduleVersionId, audit });
       }
 
       // Fast win: meet per-resident rule (≤1 B2B block each) with no transplant B2B — acceptable soft warnings for remaining global edges.
@@ -1752,13 +1979,13 @@ export async function generateSchedule({
           assignmentRows,
         });
         if (strenuousMetrics.totalEdges === 0 && strenuousAuditLines === 0) {
-          return { scheduleVersionId, audit };
+          return withFeasibility(staticData, audit, { scheduleVersionId, audit });
         }
-        return {
+        return withFeasibility(staticData, audit, {
           scheduleVersionId,
           audit,
           strenuousConsultB2bBestEffort: metaFrom(audit, strenuousMetrics),
-        };
+        });
       }
 
       const prevP = bestHard
@@ -1800,7 +2027,7 @@ export async function generateSchedule({
         attempt,
         assignmentRows,
       });
-      return { scheduleVersionId, audit };
+      return withFeasibility(staticData, audit, { scheduleVersionId, audit });
     }
 
     const nextFallback = {
@@ -1843,13 +2070,13 @@ export async function generateSchedule({
         bestHard.strenuousMetrics.residentsOverOne > 0 ||
         bestHard.strenuousMetrics.totalEdges > 0 ||
         bestHard.strenuousAuditLines > 0;
-      return {
+      return withFeasibility(staticData, bestHard.audit, {
         scheduleVersionId,
         audit: bestHard.audit,
         ...(needsBanner
           ? { strenuousConsultB2bBestEffort: metaFrom(bestHard.audit, bestHard.strenuousMetrics) }
           : {}),
-      };
+      });
     }
     if (bestAny && bestAny.requirementViolations === 0) {
       const scheduleVersionId = await persistSchedule({
@@ -1859,11 +2086,11 @@ export async function generateSchedule({
         attempt: bestAny.attempt,
         assignmentRows: bestAny.assignmentRows,
       });
-      return {
+      return withFeasibility(staticData, bestAny.audit, {
         scheduleVersionId,
         audit: bestAny.audit,
         strenuousConsultB2bBestEffort: metaFrom(bestAny.audit, bestAny.strenuousMetrics),
-      };
+      });
     }
   }
 
@@ -1875,7 +2102,7 @@ export async function generateSchedule({
       attempt: bestHard.attempt,
       assignmentRows: bestHard.assignmentRows,
     });
-    return { scheduleVersionId, audit: bestHard.audit };
+    return withFeasibility(staticData, bestHard.audit, { scheduleVersionId, audit: bestHard.audit });
   }
 
   if (bestAny && bestAny.requirementViolations === 0) {
@@ -1886,7 +2113,7 @@ export async function generateSchedule({
       attempt: bestAny.attempt,
       assignmentRows: bestAny.assignmentRows,
     });
-    return { scheduleVersionId, audit: bestAny.audit };
+    return withFeasibility(staticData, bestAny.audit, { scheduleVersionId, audit: bestAny.audit });
   }
 
   if (bestAny) {
@@ -1897,15 +2124,15 @@ export async function generateSchedule({
       attempt: bestAny.attempt,
       assignmentRows: bestAny.assignmentRows,
     });
-    return {
+    return withFeasibility(staticData, bestAny.audit, {
       scheduleVersionId,
       audit: bestAny.audit,
       requirementsPartial: true,
       ...(prioritizeStrenuousSpacing
         ? { strenuousConsultB2bBestEffort: metaFrom(bestAny.audit, bestAny.strenuousMetrics) }
         : {}),
-    };
+    });
   }
 
-  throw new Error(SCHEDULE_ERROR_REQUIREMENTS_UNSATISFIABLE);
+  throw new ScheduleUnsatError(buildFeasibilityReport(staticData, null));
 }
