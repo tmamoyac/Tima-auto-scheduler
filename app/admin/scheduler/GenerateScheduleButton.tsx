@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/apiFetch";
 import {
-  formatRequirementsBestEffortBanner,
   formatStrenuousBestEffortBanner,
   type ScheduleAudit,
   type StrenuousConsultB2bBestEffortMeta,
@@ -15,7 +14,6 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [audit, setAudit] = useState<ScheduleAudit | null>(null);
   const [strenuousBestEffortBanner, setStrenuousBestEffortBanner] = useState<string | null>(null);
-  const [requirementsGapBanner, setRequirementsGapBanner] = useState<string | null>(null);
   const searchParams = useSearchParams();
 
   const academicYearId =
@@ -33,7 +31,6 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
         audit: ScheduleAudit;
         ts: number;
         strenuousBestEffortBanner?: string | null;
-        requirementsGapBanner?: string | null;
       };
       if (!parsed || parsed.programId !== programId) return;
 
@@ -42,16 +39,10 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
 
       setAudit(parsed.audit);
       setStrenuousBestEffortBanner(parsed.strenuousBestEffortBanner ?? null);
-      setRequirementsGapBanner(parsed.requirementsGapBanner ?? null);
 
       const reqViol = parsed.audit.requirementViolations.length;
       const softViol = parsed.audit.softRuleViolations.length;
-      if (reqViol > 0 && parsed.requirementsGapBanner) {
-        setMessage({
-          type: "success",
-          text: "Schedule saved (best effort: some requirements unmet). See audit.",
-        });
-      } else if (reqViol > 0) {
+      if (reqViol > 0) {
         setMessage({ type: "error", text: "Hard requirements were not met (unexpected)." });
       } else if (softViol > 0) {
         setMessage({
@@ -73,7 +64,6 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
     setMessage(null);
     setAudit(null);
     setStrenuousBestEffortBanner(null);
-    setRequirementsGapBanner(null);
     try {
       const res = await apiFetch(`/api/scheduler/generate?programId=${encodeURIComponent(programId)}`, {
         method: "POST",
@@ -84,7 +74,6 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
         scheduleVersionId?: string;
         audit?: ScheduleAudit;
         strenuousConsultB2bBestEffort?: StrenuousConsultB2bBestEffortMeta;
-        requirementsBestEffort?: true;
       } = {};
       if (contentType.includes("application/json")) {
         data = await res.json();
@@ -132,25 +121,19 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
       const effortBanner = effort ? formatStrenuousBestEffortBanner(effort) : null;
       if (effortBanner) setStrenuousBestEffortBanner(effortBanner);
 
-      const reqGapSaved = data.requirementsBestEffort === true && reqViol > 0;
-      const reqGapBanner = reqGapSaved ? formatRequirementsBestEffortBanner(reqViol) : null;
-      if (reqGapBanner) setRequirementsGapBanner(reqGapBanner);
-
-      if (reqViol > 0 && !reqGapSaved) {
+      if (reqViol > 0) {
         setAudit(a);
         setMessage({ type: "error", text: "Hard requirements were not met (unexpected)." });
         return;
       }
 
-      if (reqGapSaved || softViol > 0 || effortBanner) {
+      if (softViol > 0 || effortBanner) {
         setAudit(a);
         setMessage({
           type: "success",
-          text: reqGapSaved
-            ? "Schedule saved (best effort: unmet rotation requirements). Reloading…"
-            : effortBanner
-              ? "Schedule saved (best effort within search time). Reloading…"
-              : "Schedule created with soft-rule warnings (see below). Reloading…",
+          text: effortBanner
+            ? "Schedule saved (best effort within search time). Reloading…"
+            : "Schedule created with soft-rule warnings (see below). Reloading…",
         });
         try {
           sessionStorage.setItem(
@@ -160,7 +143,6 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
               audit: a,
               ts: Date.now(),
               strenuousBestEffortBanner: effortBanner,
-              requirementsGapBanner: reqGapBanner,
             })
           );
         } catch {
@@ -204,12 +186,6 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
       {audit && (
         <div className="mt-3 max-w-2xl rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm">
           <h3 className="font-semibold text-amber-900 mb-2">Schedule Audit Report</h3>
-
-          {requirementsGapBanner && (
-            <p className="mb-3 rounded border border-red-300 bg-red-50 px-3 py-2 font-medium text-red-900">
-              {requirementsGapBanner}
-            </p>
-          )}
 
           {strenuousBestEffortBanner && (
             <p className="mb-3 rounded border border-amber-400 bg-amber-100 px-3 py-2 font-medium text-amber-950">

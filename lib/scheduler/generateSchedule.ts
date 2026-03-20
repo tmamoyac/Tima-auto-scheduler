@@ -81,6 +81,9 @@ type LoadedSchedulerStaticData = {
   requirePgyStartAtPrimarySite: boolean;
   pgyStartAtPrimarySite: number;
   vacationRanges: VacationRange[];
+  /** ISO dates; used to infer month windows when `months` rows lack start/end. */
+  academicYearStart: string;
+  academicYearEnd: string;
   fixedRuleMap: Map<string, string>;
   requirementsList: Requirement[];
   residentReqByResident: Map<string, { rotation_id: string; min_months_required: number }[]>;
@@ -163,7 +166,10 @@ async function loadSchedulerStaticData({
     .select("resident_id, start_date, end_date")
     .lte("start_date", yearEnd)
     .gte("end_date", yearStart);
-  const vacationRanges = (vacationRows ?? []) as VacationRange[];
+  const residentIdSet = new Set(residentsList.map((r) => r.id));
+  const vacationRanges = ((vacationRows ?? []) as VacationRange[]).filter((v) =>
+    residentIdSet.has(v.resident_id)
+  );
 
   const { data: fixedRulesRows } = await supabaseAdmin
     .from("fixed_assignment_rules")
@@ -216,10 +222,32 @@ async function loadSchedulerStaticData({
     requirePgyStartAtPrimarySite,
     pgyStartAtPrimarySite,
     vacationRanges,
+    academicYearStart: yearStart,
+    academicYearEnd: yearEnd,
     fixedRuleMap,
     requirementsList,
     residentReqByResident,
   };
+}
+
+/** When month rows have no dates, split academic year evenly for vacation overlap checks. */
+function approximateMonthWindowUtc(
+  yearStartIso: string,
+  yearEndIso: string,
+  monthIndex: number,
+  totalMonths: number
+): { start: string; end: string } | null {
+  if (!yearStartIso || !yearEndIso || totalMonths <= 0) return null;
+  const s = yearStartIso.includes("T") ? yearStartIso : `${yearStartIso}T00:00:00.000Z`;
+  const e = yearEndIso.includes("T") ? yearEndIso : `${yearEndIso}T23:59:59.999Z`;
+  const t0 = Date.parse(s);
+  const t1 = Date.parse(e);
+  if (Number.isNaN(t0) || Number.isNaN(t1) || t1 <= t0) return null;
+  const slice = (t1 - t0) / totalMonths;
+  const segStart = t0 + monthIndex * slice;
+  const segEnd = t0 + (monthIndex + 1) * slice - 1;
+  const fmt = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  return { start: fmt(segStart), end: fmt(segEnd) };
 }
 
 async function buildScheduleVariation({
@@ -246,6 +274,8 @@ async function buildScheduleVariation({
     requirePgyStartAtPrimarySite,
     pgyStartAtPrimarySite,
     vacationRanges,
+    academicYearStart,
+    academicYearEnd,
     fixedRuleMap,
     requirementsList,
     residentReqByResident,
@@ -276,9 +306,22 @@ async function buildScheduleVariation({
     consultRotationIdsForVacation.has(rotationId) || consultRotationIdsForBackToBack.has(rotationId);
 
   const vacationSet = new Set<string>();
+  const nMonths = monthsList.length;
   for (const month of monthsList) {
-    const mStart = month.start_date ?? "";
-    const mEnd = month.end_date ?? "";
+    let mStart = (month.start_date ?? "").trim();
+    let mEnd = (month.end_date ?? "").trim();
+    if (!mStart || !mEnd) {
+      const approx = approximateMonthWindowUtc(
+        academicYearStart,
+        academicYearEnd,
+        month.month_index,
+        nMonths
+      );
+      if (approx) {
+        mStart = approx.start;
+        mEnd = approx.end;
+      }
+    }
     if (!mStart || !mEnd) continue;
     for (const resident of residentsList) {
       const hasOverlap = vacationRanges.some(
@@ -944,6 +987,40 @@ async function buildScheduleVariation({
     if (!applied) continue;
   }
 
+  // Safety net: repair/enforce phases may still place consult/strenuous months on vacation.
+  // Strip those assignments and re-run repair so consult never remains on a vacation month.
+  const syncRequiredRemainingFromAssignments = () => {
+    const counts = new Map<string, number>();
+    for (const row of assignmentRows) {
+      if (!row.rotation_id) continue;
+      const k = reqKey(row.resident_id, row.rotation_id);
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    for (const [k, init] of initialRequired) {
+      const assigned = counts.get(k) ?? 0;
+      required.set(k, Math.max(0, init - assigned));
+    }
+  };
+
+  const stripConsultAssignmentsOnVacationMonths = () => {
+    if (!noConsultWhenVacationInMonth) return;
+    syncRequiredRemainingFromAssignments();
+    for (let i = 0; i < assignmentRows.length; i++) {
+      const row = assignmentRows[i];
+      const rid = row.rotation_id;
+      if (!rid) continue;
+      if (!consultBlockedOnVacationMonth(row.resident_id, row.month_id, rid)) continue;
+      const ck = capKey(row.month_id, rid);
+      capacity.set(ck, (capacity.get(ck) ?? 0) + 1);
+      const rk = reqKey(row.resident_id, rid);
+      required.set(rk, (required.get(rk) ?? 0) + 1);
+      row.rotation_id = null;
+    }
+  };
+
+  stripConsultAssignmentsOnVacationMonths();
+  runRepairPass(12);
+
   // Phase D: score-based minimizer for the soft violations we report in the audit UI.
   // This tries to reduce the global soft violation count to <= 3 while preserving per-resident
   // rotation counts (by swapping two non-null rotation slots within the same resident).
@@ -1155,6 +1232,9 @@ async function buildScheduleVariation({
     pairScore += bestDelta;
   }
 
+  stripConsultAssignmentsOnVacationMonths();
+  runRepairPass(12);
+
   // Post-generation audit
   const audit: ScheduleAudit = { requirementViolations: [], softRuleViolations: [] };
 
@@ -1309,11 +1389,6 @@ export type GenerateScheduleResult = {
    * (search budget exhausted). Schedule is still the lexicographically best attempt found.
    */
   strenuousConsultB2bBestEffort?: StrenuousConsultB2bBestEffortMeta;
-  /**
-   * Set when the saved schedule still has rotation requirement gaps (no fully satisfiable attempt
-   * in the search budget); this is the closest attempt by requirement count, then strenuous spacing.
-   */
-  requirementsBestEffort?: true;
 };
 
 /** UX copy when a best-effort schedule is returned while {@link STRENUOUS_B2B_BEST_EFFORT_TARGET_MAX_EXCLUSIVE} is not met. */
@@ -1323,10 +1398,6 @@ export function formatStrenuousBestEffortBanner(meta: StrenuousConsultB2bBestEff
     return `${violationCount} strenuous consult spacing violation(s)—under goal of fewer than ${targetMaxExclusive}. Review details below.`;
   }
   return `Best schedule in search time has ${violationCount} strenuous consult spacing violation(s) (goal: fewer than ${targetMaxExclusive}). Review the audit, or adjust capacity/requirements and generate again.`;
-}
-
-export function formatRequirementsBestEffortBanner(requirementViolationCount: number): string {
-  return `Saved the closest schedule found in the search window, but ${requirementViolationCount} requirement issue(s) remain in the audit. Increase rotation capacity, adjust minimum required months, or reduce fixed rules, then generate again.`;
 }
 
 /**
@@ -1629,30 +1700,10 @@ export async function generateSchedule({
       return {
         scheduleVersionId,
         audit: bestHard.audit,
-        strenuousConsultB2bBestEffort: {
-          violationCount: bestHard.strenuousConsultBackToBackViolations,
-          targetMaxExclusive: STRENUOUS_B2B_BEST_EFFORT_TARGET_MAX_EXCLUSIVE,
-        },
-      };
-    }
-    // No attempt met all requirements; still persist the closest schedule (minimize req gaps, then strenuous).
-    if (bestAny) {
-      const scheduleVersionId = await persistSchedule({
-        supabaseAdmin,
-        academicYearId,
-        seed: bestAny.seed,
-        attempt: bestAny.attempt,
-        assignmentRows: bestAny.assignmentRows,
-      });
-      const reqGap = bestAny.requirementViolations;
-      return {
-        scheduleVersionId,
-        audit: bestAny.audit,
-        ...(reqGap > 0 ? { requirementsBestEffort: true as const } : {}),
-        ...(bestAny.strenuousConsultBackToBackViolations > 0
+        ...(bestHard.strenuousConsultBackToBackViolations > 0
           ? {
               strenuousConsultB2bBestEffort: {
-                violationCount: bestAny.strenuousConsultBackToBackViolations,
+                violationCount: bestHard.strenuousConsultBackToBackViolations,
                 targetMaxExclusive: STRENUOUS_B2B_BEST_EFFORT_TARGET_MAX_EXCLUSIVE,
               },
             }
@@ -1673,7 +1724,7 @@ export async function generateSchedule({
     return { scheduleVersionId, audit: bestHard.audit };
   }
 
-  if (bestAny) {
+  if (bestAny && bestAny.requirementViolations === 0) {
     const scheduleVersionId = await persistSchedule({
       supabaseAdmin,
       academicYearId,
