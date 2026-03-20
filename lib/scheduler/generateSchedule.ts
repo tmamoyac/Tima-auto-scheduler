@@ -1239,20 +1239,59 @@ async function buildScheduleVariation({
   return { assignmentRows, audit };
 }
 
-/** Program requires zero back-to-back strenuous (blocker) consult months; generation failed to find one in time. */
-export const SCHEDULE_ERROR_STRENUOUS_B2B_UNSATISFIABLE = "STRENUOUS_B2B_UNSATISFIABLE";
-
 export const SCHEDULE_ERROR_REQUIREMENTS_UNSATISFIABLE = "SCHEDULE_CONSTRAINTS_UNSATISFIABLE";
 
-/** User-facing hint when {@link SCHEDULE_ERROR_STRENUOUS_B2B_UNSATISFIABLE} is thrown. */
-export const STRENUOUS_B2B_UNSATISFIABLE_MESSAGE =
-  "Could not find a schedule without back-to-back strenuous consult months within the search time limit. Try increasing capacity for those rotations, reducing required months, easing fixed assignment rules, or confirming only truly strenuous rotations (e.g. UCI Orange) are marked as back-to-back consult blockers—not every consult rotation.";
+/**
+ * When "avoid B2B consult" is on, UI copy treats fewer than this many strenuous-spacing audit lines
+ * (back-to-back + 3-in-a-row) as meeting the soft target.
+ */
+export const STRENUOUS_B2B_BEST_EFFORT_TARGET_MAX_EXCLUSIVE = 3;
 
-/** Counts back-to-back consult rows for rotations in the strenuous/blocker set (or all consults if fallback). */
+export type StrenuousConsultB2bBestEffortMeta = {
+  /** Number of strenuous-related audit lines (B2B + 3-in-a-row) in the saved schedule. */
+  violationCount: number;
+  /** Same as {@link STRENUOUS_B2B_BEST_EFFORT_TARGET_MAX_EXCLUSIVE}. */
+  targetMaxExclusive: number;
+};
+
+export type GenerateScheduleResult = {
+  scheduleVersionId: string;
+  audit: ScheduleAudit;
+  /**
+   * Set when requirements are met but we did not achieve zero strenuous-spacing violations
+   * (search budget exhausted). Schedule is still the lexicographically best attempt found.
+   */
+  strenuousConsultB2bBestEffort?: StrenuousConsultB2bBestEffortMeta;
+  /**
+   * Set when the saved schedule still has rotation requirement gaps (no fully satisfiable attempt
+   * in the search budget); this is the closest attempt by requirement count, then strenuous spacing.
+   */
+  requirementsBestEffort?: true;
+};
+
+/** UX copy when a best-effort schedule is returned while {@link STRENUOUS_B2B_BEST_EFFORT_TARGET_MAX_EXCLUSIVE} is not met. */
+export function formatStrenuousBestEffortBanner(meta: StrenuousConsultB2bBestEffortMeta): string {
+  const { violationCount, targetMaxExclusive } = meta;
+  if (violationCount < targetMaxExclusive) {
+    return `${violationCount} strenuous consult spacing violation(s) in audit—under your target of ${targetMaxExclusive}. Review details below.`;
+  }
+  return `Best schedule in search time has ${violationCount} strenuous consult spacing violation(s) (goal: fewer than ${targetMaxExclusive}). Review the audit, or adjust capacity/requirements and generate again.`;
+}
+
+export function formatRequirementsBestEffortBanner(requirementViolationCount: number): string {
+  return `Saved the closest schedule found in the search window, but ${requirementViolationCount} requirement issue(s) remain in the audit. Increase rotation capacity, adjust minimum required months, or reduce fixed rules, then generate again.`;
+}
+
+/**
+ * Strenuous consult spacing audit lines: adjacent blocker months and 3-in-a-row (or legacy consult fallback labels).
+ */
 function countStrenuousConsultBackToBackViolations(audit: ScheduleAudit): number {
   return audit.softRuleViolations.filter(
     (v) =>
-      v.rule.startsWith("Back-to-back strenuous consult:") || v.rule.startsWith("Back-to-back consult:")
+      v.rule.startsWith("Back-to-back strenuous consult:") ||
+      v.rule.startsWith("Back-to-back consult:") ||
+      v.rule.startsWith("3-in-a-row strenuous consult:") ||
+      v.rule.startsWith("3-in-a-row consult:")
   ).length;
 }
 
@@ -1342,7 +1381,7 @@ export async function generateSchedule({
 }: {
   supabaseAdmin: SupabaseClient;
   academicYearId: string;
-}): Promise<{ scheduleVersionId: string; audit: ScheduleAudit }> {
+}): Promise<GenerateScheduleResult> {
   const baseSeed = (hashStringToU32(academicYearId) ^ (Date.now() >>> 0)) >>> 0;
 
   let bestHard:
@@ -1391,17 +1430,15 @@ export async function generateSchedule({
   };
 
   const staticData = await loadSchedulerStaticData({ supabaseAdmin, academicYearId });
-  /** When true, we never persist a schedule that has any strenuous (blocker↔blocker) consult adjacency. */
-  const enforceStrenuousB2BMaxZero = staticData.avoidBackToBackConsult === true;
+  /** When true, we prefer zero strenuous spacing violations but fall back to the best schedule found (fewest violations first). */
+  const prioritizeStrenuousSpacing = staticData.avoidBackToBackConsult === true;
 
   // When avoiding back-to-back strenuous consults, increase retry budget to
   // give the in-memory repair/minimizer enough opportunity to discover a
   // zero-violation arrangement (if one exists).
-  const maxAttempts = staticData.avoidBackToBackConsult ? 80 : 40;
-  // Hard wall-clock budget so generation always returns promptly with best fallback.
-  const deadlineTs = Date.now() + (staticData.avoidBackToBackConsult ? 12000 : 8000);
-
-  let sawReqOkWithStrenuousViolations = false;
+  const maxAttempts = staticData.avoidBackToBackConsult ? 120 : 40;
+  // Hard wall-clock budget (strenuous mode needs more seeds to hit satisfiable requirements + spacing).
+  const deadlineTs = Date.now() + (staticData.avoidBackToBackConsult ? 28000 : 8000);
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (Date.now() >= deadlineTs) break;
@@ -1416,38 +1453,37 @@ export async function generateSchedule({
     const reqViolCount = audit.requirementViolations.length;
     const softCount = audit.softRuleViolations.length;
 
-    // When we do not enforce strenuous as a hard gate, keep a global best candidate for fallbacks.
-    if (!enforceStrenuousB2BMaxZero) {
-      if (
-        !bestAny ||
-        reqViolCount < bestAny.requirementViolations ||
-        (reqViolCount === bestAny.requirementViolations &&
-          strenuousConsultBackToBackViolations < bestAny.strenuousConsultBackToBackViolations) ||
-        (reqViolCount === bestAny.requirementViolations &&
-          strenuousConsultBackToBackViolations === bestAny.strenuousConsultBackToBackViolations &&
-          transplantBackToBackViolations < bestAny.transplantBackToBackViolations) ||
-        (reqViolCount === bestAny.requirementViolations &&
-          strenuousConsultBackToBackViolations === bestAny.strenuousConsultBackToBackViolations &&
-          transplantBackToBackViolations === bestAny.transplantBackToBackViolations &&
-          softCount < bestAny.softCount)
-      ) {
-        bestAny = {
-          assignmentRows,
-          audit,
-          attempt,
-          seed,
-          requirementViolations: reqViolCount,
-          strenuousConsultBackToBackViolations,
-          transplantBackToBackViolations,
-          softCount,
-        };
-      }
+    // Global best over all attempts (requirement violations first), for last-resort fallback when
+    // no attempt satisfies every requirement, or if strenuous-specific logic did not persist earlier.
+    if (
+      !bestAny ||
+      reqViolCount < bestAny.requirementViolations ||
+      (reqViolCount === bestAny.requirementViolations &&
+        strenuousConsultBackToBackViolations < bestAny.strenuousConsultBackToBackViolations) ||
+      (reqViolCount === bestAny.requirementViolations &&
+        strenuousConsultBackToBackViolations === bestAny.strenuousConsultBackToBackViolations &&
+        transplantBackToBackViolations < bestAny.transplantBackToBackViolations) ||
+      (reqViolCount === bestAny.requirementViolations &&
+        strenuousConsultBackToBackViolations === bestAny.strenuousConsultBackToBackViolations &&
+        transplantBackToBackViolations === bestAny.transplantBackToBackViolations &&
+        softCount < bestAny.softCount)
+    ) {
+      bestAny = {
+        assignmentRows,
+        audit,
+        attempt,
+        seed,
+        requirementViolations: reqViolCount,
+        strenuousConsultBackToBackViolations,
+        transplantBackToBackViolations,
+        softCount,
+      };
     }
 
     const hardOk = reqViolCount === 0;
     if (!hardOk) continue;
 
-    if (enforceStrenuousB2BMaxZero) {
+    if (prioritizeStrenuousSpacing) {
       if (strenuousConsultBackToBackViolations === 0) {
         const scheduleVersionId = await persistSchedule({
           supabaseAdmin,
@@ -1458,7 +1494,6 @@ export async function generateSchedule({
         });
         return { scheduleVersionId, audit };
       }
-      sawReqOkWithStrenuousViolations = true;
       const nextFallback = {
         strenuousConsultBackToBackViolations,
         transplantBackToBackViolations,
@@ -1525,9 +1560,47 @@ export async function generateSchedule({
     }
   }
 
-  if (enforceStrenuousB2BMaxZero) {
-    if (sawReqOkWithStrenuousViolations) {
-      throw new Error(`${SCHEDULE_ERROR_STRENUOUS_B2B_UNSATISFIABLE}: ${STRENUOUS_B2B_UNSATISFIABLE_MESSAGE}`);
+  if (prioritizeStrenuousSpacing) {
+    if (bestHard) {
+      const scheduleVersionId = await persistSchedule({
+        supabaseAdmin,
+        academicYearId,
+        seed: bestHard.seed,
+        attempt: bestHard.attempt,
+        assignmentRows: bestHard.assignmentRows,
+      });
+      return {
+        scheduleVersionId,
+        audit: bestHard.audit,
+        strenuousConsultB2bBestEffort: {
+          violationCount: bestHard.strenuousConsultBackToBackViolations,
+          targetMaxExclusive: STRENUOUS_B2B_BEST_EFFORT_TARGET_MAX_EXCLUSIVE,
+        },
+      };
+    }
+    // No attempt met all requirements; still persist the closest schedule (minimize req gaps, then strenuous).
+    if (bestAny) {
+      const scheduleVersionId = await persistSchedule({
+        supabaseAdmin,
+        academicYearId,
+        seed: bestAny.seed,
+        attempt: bestAny.attempt,
+        assignmentRows: bestAny.assignmentRows,
+      });
+      const reqGap = bestAny.requirementViolations;
+      return {
+        scheduleVersionId,
+        audit: bestAny.audit,
+        ...(reqGap > 0 ? { requirementsBestEffort: true as const } : {}),
+        ...(bestAny.strenuousConsultBackToBackViolations > 0
+          ? {
+              strenuousConsultB2bBestEffort: {
+                violationCount: bestAny.strenuousConsultBackToBackViolations,
+                targetMaxExclusive: STRENUOUS_B2B_BEST_EFFORT_TARGET_MAX_EXCLUSIVE,
+              },
+            }
+          : {}),
+      };
     }
     throw new Error(SCHEDULE_ERROR_REQUIREMENTS_UNSATISFIABLE);
   }
