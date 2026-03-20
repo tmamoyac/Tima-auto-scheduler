@@ -271,6 +271,10 @@ async function buildScheduleVariation({
     backToBackBlockerRotationIds.size > 0 ? backToBackBlockerRotationIds : consultRotationIdsForVacation;
   const useStrenuousConsultLabels = backToBackBlockerRotationIds.size > 0;
 
+  /** Any rotation that must not be scheduled in a month where the resident has vacation (consults + strenuous blockers). */
+  const isRotationBlockedWhenResidentOnVacation = (rotationId: string): boolean =>
+    consultRotationIdsForVacation.has(rotationId) || consultRotationIdsForBackToBack.has(rotationId);
+
   const vacationSet = new Set<string>();
   for (const month of monthsList) {
     const mStart = month.start_date ?? "";
@@ -283,6 +287,13 @@ async function buildScheduleVariation({
       if (hasOverlap) vacationSet.add(residentMonthKey(resident.id, month.id));
     }
   }
+
+  /** True when program rule blocks placing this rotation in a month where the resident has vacation. */
+  const consultBlockedOnVacationMonth = (residentId: string, monthId: string, rotationId: string): boolean => {
+    if (!noConsultWhenVacationInMonth) return false;
+    if (!isRotationBlockedWhenResidentOnVacation(rotationId)) return false;
+    return vacationSet.has(residentMonthKey(residentId, monthId));
+  };
 
   // 3) Build capacity: for each (month, rotation) -> capacity_per_month
   const capacity = new Map<string, number>();
@@ -367,7 +378,7 @@ async function buildScheduleVariation({
       if (!ruleRotId) continue;
       const onVac = vacationSet.has(residentMonthKey(resident.id, month.id));
       if (onVac && !noConsultWhenVacationInMonth) continue;
-      if (onVac && consultRotationIdsForVacation.has(ruleRotId)) continue;
+      if (onVac && isRotationBlockedWhenResidentOnVacation(ruleRotId)) continue;
       const ruleRot = rotationById.get(ruleRotId);
       if (!ruleRot) continue;
       if ((capacity.get(capKey(month.id, ruleRot.id)) ?? 0) <= 0) continue;
@@ -413,7 +424,8 @@ async function buildScheduleVariation({
           if ((required.get(reqKey(res.id, rot.id)) ?? 0) <= 0) return false;
           if (res.pgy < rot.eligible_pgy_min || res.pgy > rot.eligible_pgy_max) return false;
           const onVac = vacationSet.has(residentMonthKey(res.id, month.id));
-          if (onVac && noConsultWhenVacationInMonth && consultRotationIdsForVacation.has(rot.id)) return false;
+          if (onVac && noConsultWhenVacationInMonth && isRotationBlockedWhenResidentOnVacation(rot.id))
+            return false;
           if (
             mi === 0 &&
             requirePgyStartAtPrimarySite &&
@@ -477,7 +489,7 @@ async function buildScheduleVariation({
         .filter((r) => {
           if (resident.pgy < r.eligible_pgy_min || resident.pgy > r.eligible_pgy_max) return false;
           if ((capacity.get(capKey(month.id, r.id)) ?? 0) <= 0) return false;
-          if (onVac && noConsultWhenVacationInMonth && consultRotationIdsForVacation.has(r.id)) return false;
+          if (onVac && noConsultWhenVacationInMonth && isRotationBlockedWhenResidentOnVacation(r.id)) return false;
           return (required.get(reqKey(resident.id, r.id)) ?? 0) > 0;
         })
         .sort((a, b) => {
@@ -526,6 +538,7 @@ async function buildScheduleVariation({
           const ck = capKey(month.id, rot.id);
           if ((capacity.get(ck) ?? 0) <= 0) continue;
           if (resident.pgy < rot.eligible_pgy_min || resident.pgy > rot.eligible_pgy_max) continue;
+          if (consultBlockedOnVacationMonth(resident.id, month.id, rot.id)) continue;
 
           assignmentRows[idx].rotation_id = rot.id;
           capacity.set(ck, (capacity.get(ck) ?? 0) - 1);
@@ -558,6 +571,7 @@ async function buildScheduleVariation({
 
           const ck = capKey(month.id, rot.id);
           if ((capacity.get(ck) ?? 0) <= 0) continue;
+          if (consultBlockedOnVacationMonth(resident.id, month.id, rot.id)) continue;
 
           const oldCk = capKey(month.id, currentRotId);
           capacity.set(oldCk, (capacity.get(oldCk) ?? 0) + 1);
@@ -601,6 +615,8 @@ async function buildScheduleVariation({
 
             const ckY = capKey(monthMp.id, currentRotId);
             if ((capacity.get(ckY) ?? 0) <= 0) continue;
+            if (consultBlockedOnVacationMonth(resident.id, monthM.id, neededRot.id)) continue;
+            if (consultBlockedOnVacationMonth(resident.id, monthMp.id, currentRotId)) continue;
 
             assignmentRows[idxMp].rotation_id = currentRotId;
             const ckYinM = capKey(monthM.id, currentRotId);
@@ -636,7 +652,11 @@ async function buildScheduleVariation({
           const aRotId = assignmentRows[idxA].rotation_id;
 
           // If capacity exists and A is unassigned, assign directly (Phase A catch-up)
-          if ((capacity.get(capKey(month.id, rot.id)) ?? 0) > 0 && aRotId === null) {
+          if (
+            (capacity.get(capKey(month.id, rot.id)) ?? 0) > 0 &&
+            aRotId === null &&
+            !consultBlockedOnVacationMonth(resA.id, month.id, rot.id)
+          ) {
             assignmentRows[idxA].rotation_id = rot.id;
             capacity.set(capKey(month.id, rot.id), (capacity.get(capKey(month.id, rot.id)) ?? 0) - 1);
             required.set(reqKey(resA.id, rot.id), (required.get(reqKey(resA.id, rot.id)) ?? 0) - 1);
@@ -662,6 +682,7 @@ async function buildScheduleVariation({
             if (bCount <= bInit) continue;
 
             if (aRotId === null) {
+              if (consultBlockedOnVacationMonth(resA.id, month.id, rot.id)) continue;
               // A unassigned, B has excess: A takes rot, B gets null
               // Update capacity map to reflect both the removal and addition in the same month.
               const capRot = capKey(month.id, rot.id);
@@ -696,6 +717,8 @@ async function buildScheduleVariation({
               const aRotObj = rotationById.get(aRotId);
               if (!aRotObj) continue;
               if (resB.pgy < aRotObj.eligible_pgy_min || resB.pgy > aRotObj.eligible_pgy_max) continue;
+              if (consultBlockedOnVacationMonth(resA.id, month.id, rot.id)) continue;
+              if (consultBlockedOnVacationMonth(resB.id, month.id, aRotId)) continue;
 
               // Swap within the same month: A(aRotId)->rot and B(rot)->aRotId.
               const capRot = capKey(month.id, rot.id);
@@ -846,7 +869,7 @@ async function buildScheduleVariation({
 
       // Case 1: Direct placement if capacity remains.
       const canPlaceDirectly = (capacity.get(capKey(month.id, neededRot.id)) ?? 0) > 0;
-      if (canPlaceDirectly) {
+      if (canPlaceDirectly && !consultBlockedOnVacationMonth(res.id, month.id, neededRot.id)) {
         if (currRotIdA) {
           // Free currRotIdA and consume neededRot.
           capacity.set(
@@ -885,6 +908,9 @@ async function buildScheduleVariation({
           if (!bRes || !currRotObj) continue;
           if (bRes.pgy < currRotObj.eligible_pgy_min || bRes.pgy > currRotObj.eligible_pgy_max) continue;
         }
+
+        if (consultBlockedOnVacationMonth(res.id, month.id, neededRot.id)) continue;
+        if (currRotIdA && consultBlockedOnVacationMonth(rowB.resident_id, month.id, currRotIdA)) continue;
 
         // Perform swap.
         assignmentRows[idxA].rotation_id = neededRot.id;
@@ -1006,6 +1032,9 @@ async function buildScheduleVariation({
     const rotI = assignmentRows[idxI].rotation_id;
     const rotJ = assignmentRows[idxJ].rotation_id;
     if (!rotI || !rotJ || rotI === rotJ) return false;
+
+    if (consultBlockedOnVacationMonth(resident.id, monthsList[i].id, rotJ)) return false;
+    if (consultBlockedOnVacationMonth(resident.id, monthsList[j].id, rotI)) return false;
 
     // Hard constraint: ensure both rotations can fit in the opposite months by capacity.
     if ((capacity.get(capKey(monthsList[j].id, rotI)) ?? 0) < 1) return false;
@@ -1168,6 +1197,23 @@ async function buildScheduleVariation({
     assignmentLookup.set(residentMonthKey(row.resident_id, row.month_id), row.rotation_id);
   }
 
+  if (noConsultWhenVacationInMonth) {
+    for (const res of residentsList) {
+      const resName = `${res.first_name ?? ""} ${res.last_name ?? ""}`.trim();
+      for (const m of monthsList) {
+        const rotId = assignmentLookup.get(residentMonthKey(res.id, m.id));
+        if (!rotId) continue;
+        if (!consultBlockedOnVacationMonth(res.id, m.id, rotId)) continue;
+        const rotLabel = rotationById.get(rotId)?.name ?? rotId;
+        audit.softRuleViolations.push({
+          residentName: resName,
+          monthLabel: monthIdToLabel.get(m.id) ?? "",
+          rule: `Consult during vacation month: ${rotLabel}`,
+        });
+      }
+    }
+  }
+
   for (const res of residentsList) {
     for (let mi = 1; mi < monthsList.length; mi++) {
       const prevMId = monthsList[mi - 1].id;
@@ -1245,7 +1291,8 @@ export const SCHEDULE_ERROR_REQUIREMENTS_UNSATISFIABLE = "SCHEDULE_CONSTRAINTS_U
  * When "avoid B2B consult" is on, UI copy treats fewer than this many strenuous-spacing audit lines
  * (back-to-back + 3-in-a-row) as meeting the soft target.
  */
-export const STRENUOUS_B2B_BEST_EFFORT_TARGET_MAX_EXCLUSIVE = 3;
+/** Violation count must be **strictly less than** this to meet the soft target (e.g. `2` ⇒ allow `0` or `1`). */
+export const STRENUOUS_B2B_BEST_EFFORT_TARGET_MAX_EXCLUSIVE = 2;
 
 export type StrenuousConsultB2bBestEffortMeta = {
   /** Number of strenuous-related audit lines (B2B + 3-in-a-row) in the saved schedule. */
@@ -1273,7 +1320,7 @@ export type GenerateScheduleResult = {
 export function formatStrenuousBestEffortBanner(meta: StrenuousConsultB2bBestEffortMeta): string {
   const { violationCount, targetMaxExclusive } = meta;
   if (violationCount < targetMaxExclusive) {
-    return `${violationCount} strenuous consult spacing violation(s) in audit—under your target of ${targetMaxExclusive}. Review details below.`;
+    return `${violationCount} strenuous consult spacing violation(s)—under goal of fewer than ${targetMaxExclusive}. Review details below.`;
   }
   return `Best schedule in search time has ${violationCount} strenuous consult spacing violation(s) (goal: fewer than ${targetMaxExclusive}). Review the audit, or adjust capacity/requirements and generate again.`;
 }
@@ -1484,7 +1531,7 @@ export async function generateSchedule({
     if (!hardOk) continue;
 
     if (prioritizeStrenuousSpacing) {
-      if (strenuousConsultBackToBackViolations === 0) {
+      if (strenuousConsultBackToBackViolations < STRENUOUS_B2B_BEST_EFFORT_TARGET_MAX_EXCLUSIVE) {
         const scheduleVersionId = await persistSchedule({
           supabaseAdmin,
           academicYearId,
@@ -1492,7 +1539,17 @@ export async function generateSchedule({
           attempt,
           assignmentRows,
         });
-        return { scheduleVersionId, audit };
+        if (strenuousConsultBackToBackViolations === 0) {
+          return { scheduleVersionId, audit };
+        }
+        return {
+          scheduleVersionId,
+          audit,
+          strenuousConsultB2bBestEffort: {
+            violationCount: strenuousConsultBackToBackViolations,
+            targetMaxExclusive: STRENUOUS_B2B_BEST_EFFORT_TARGET_MAX_EXCLUSIVE,
+          },
+        };
       }
       const nextFallback = {
         strenuousConsultBackToBackViolations,
