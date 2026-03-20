@@ -1633,6 +1633,18 @@ export function buildFeasibilityReport(
   return { summary, suggestions: uniqueSuggestions, checks };
 }
 
+/**
+ * For API routes / client fallback: reload program setup from DB and merge optional audit into hints.
+ */
+export async function buildFeasibilityReportForAcademicYear(
+  supabaseAdmin: SupabaseClient,
+  academicYearId: string,
+  audit?: ScheduleAudit | null
+): Promise<FeasibilityReport> {
+  const staticData = await loadSchedulerStaticData({ supabaseAdmin, academicYearId });
+  return buildFeasibilityReport(staticData, audit ?? null);
+}
+
 export const SCHEDULE_ERROR_REQUIREMENTS_UNSATISFIABLE = "SCHEDULE_CONSTRAINTS_UNSATISFIABLE";
 
 export class ScheduleUnsatError extends Error {

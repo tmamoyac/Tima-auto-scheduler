@@ -47,7 +47,10 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
 
       const reqViol = parsed.audit.requirementViolations.length;
       const softViol = parsed.audit.softRuleViolations.length;
-      if (reqViol > 0 && parsed.requirementsPartial) {
+      if (
+        reqViol > 0 &&
+        (parsed.requirementsPartial || parsed.feasibilityReport)
+      ) {
         setMessage({
           type: "success",
           text: "Schedule saved as best effort. Review unmet requirements and suggested adjustments below.",
@@ -68,6 +71,40 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
       // ignore
     }
   }, [programId]);
+
+  // If the audit shows issues but feasibilityReport was missing (old deploy, sessionStorage gap, etc.),
+  // load hints from the server using current program setup + this audit.
+  useEffect(() => {
+    if (!academicYearId || !programId || !audit) return;
+    if (feasibilityReport) return;
+    const hasIssues =
+      audit.requirementViolations.length > 0 || audit.softRuleViolations.length > 0;
+    if (!hasIssues) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetch(
+          `/api/scheduler/feasibility-report?programId=${encodeURIComponent(programId)}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ audit }),
+          }
+        );
+        if (!res.ok || cancelled) return;
+        const payload = (await res.json()) as { feasibilityReport?: FeasibilityReport };
+        if (!cancelled && payload.feasibilityReport) {
+          setFeasibilityReport(payload.feasibilityReport);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [academicYearId, programId, audit, feasibilityReport]);
 
   function scheduleAuditPayload(
     audit: ScheduleAudit,
@@ -154,9 +191,13 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
       if (effortBanner) setStrenuousBestEffortBanner(effortBanner);
       if (data.feasibilityReport) setFeasibilityReport(data.feasibilityReport);
 
+      const savedVersionWithGaps =
+        data.requirementsPartial === true ||
+        (Boolean(scheduleVersionId) && reqViol > 0);
+
       if (reqViol > 0) {
         setAudit(a);
-        if (data.requirementsPartial) {
+        if (savedVersionWithGaps) {
           setMessage({
             type: "success",
             text: "Schedule saved as best effort: some rotation requirements still don’t match. See “What to adjust” below, then fix in Setup or manually. Reloading…",
