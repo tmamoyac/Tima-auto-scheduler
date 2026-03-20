@@ -16,11 +16,11 @@ export async function POST(request: NextRequest) {
     const ctx = await getProgramContextForRequest(supabase, supabaseAdmin, programIdFromQuery);
     if (!ctx.academicYearId) return jsonError("No academic year found for program", 400);
 
-    const { scheduleVersionId, audit } = await generateSchedule({
+    const result = await generateSchedule({
       supabaseAdmin: ctx.supabase,
       academicYearId: ctx.academicYearId,
     });
-    return NextResponse.json({ scheduleVersionId, audit });
+    return NextResponse.json(result);
   } catch (err) {
     const res = directorAuthErrorResponse(err);
     if (res) return jsonError(res.error, res.status);

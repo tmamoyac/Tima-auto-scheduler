@@ -57,6 +57,57 @@ function residentMonthKey(residentId: string, monthId: string): string {
   return `${residentId}_${monthId}`;
 }
 
+/** Same logic as buildScheduleVariation: blocker rotations if any, else all consult rotations. */
+function buildStrenuousConsultRotationIds(rotationsList: Rotation[]): Set<string> {
+  const consultIds = new Set<string>();
+  const blockerIds = new Set<string>();
+  for (const rot of rotationsList) {
+    if (rot.is_consult) consultIds.add(rot.id);
+    if (rot.is_back_to_back_consult_blocker) blockerIds.add(rot.id);
+  }
+  return blockerIds.size > 0 ? blockerIds : consultIds;
+}
+
+/**
+ * Per resident: count of month boundaries where both adjacent rotations are "strenuous" for B2B rules.
+ * User goal: at most one such boundary per resident (residentsOverOne counts those with 2+).
+ */
+export function computeStrenuousB2BMetrics(
+  assignmentRows: { resident_id: string; month_id: string; rotation_id: string | null }[],
+  monthsList: Month[],
+  residentsList: Resident[],
+  strenuousRotationIds: Set<string>
+): { totalEdges: number; residentsOverOne: number } {
+  const lookup = new Map<string, string | null>();
+  for (const row of assignmentRows) {
+    lookup.set(residentMonthKey(row.resident_id, row.month_id), row.rotation_id);
+  }
+  let totalEdges = 0;
+  let residentsOverOne = 0;
+  for (const res of residentsList) {
+    let edges = 0;
+    for (let mi = 1; mi < monthsList.length; mi++) {
+      const prev = lookup.get(residentMonthKey(res.id, monthsList[mi - 1].id));
+      const curr = lookup.get(residentMonthKey(res.id, monthsList[mi].id));
+      if (!prev || !curr) continue;
+      if (strenuousRotationIds.has(prev) && strenuousRotationIds.has(curr)) {
+        edges++;
+      }
+    }
+    totalEdges += edges;
+    if (edges > 1) residentsOverOne++;
+  }
+  return { totalEdges, residentsOverOne };
+}
+
+function isBetterStrenuousMetrics(
+  a: { residentsOverOne: number; totalEdges: number },
+  b: { residentsOverOne: number; totalEdges: number }
+): boolean {
+  if (a.residentsOverOne !== b.residentsOverOne) return a.residentsOverOne < b.residentsOverOne;
+  return a.totalEdges < b.totalEdges;
+}
+
 export type ScheduleAudit = {
   requirementViolations: {
     residentName: string;
@@ -1233,6 +1284,26 @@ async function buildScheduleVariation({
   runPhaseFEnforce();
   runRepairPass(12);
 
+  // Hard-enforce vacation rule: Phase D swaps can reintroduce consult/strenuous on vacation months.
+  if (noConsultWhenVacationInMonth) {
+    for (let vacRound = 0; vacRound < 30; vacRound++) {
+      let hasViolation = false;
+      for (const row of assignmentRows) {
+        const rid = row.rotation_id;
+        if (!rid) continue;
+        if (consultBlockedOnVacationMonth(row.resident_id, row.month_id, rid)) {
+          hasViolation = true;
+          break;
+        }
+      }
+      if (!hasViolation) break;
+      stripConsultAssignmentsOnVacationMonths();
+      runRepairPass(12);
+      runPhaseFEnforce();
+      runRepairPass(12);
+    }
+  }
+
   // Post-generation audit
   const audit: ScheduleAudit = { requirementViolations: [], softRuleViolations: [] };
 
@@ -1366,16 +1437,17 @@ async function buildScheduleVariation({
 export const SCHEDULE_ERROR_REQUIREMENTS_UNSATISFIABLE = "SCHEDULE_CONSTRAINTS_UNSATISFIABLE";
 
 /**
- * When "avoid B2B consult" is on, UI copy treats fewer than this many strenuous-spacing audit lines
- * (back-to-back + 3-in-a-row) as meeting the soft target.
+ * Legacy: global audit-line count threshold; primary goal is now per-resident B2B cap (see {@link StrenuousConsultB2bBestEffortMeta.residentsOverOne}).
  */
-/** Violation count must be **strictly less than** this to meet the soft target (e.g. `2` ⇒ allow `0` or `1`). */
 export const STRENUOUS_B2B_BEST_EFFORT_TARGET_MAX_EXCLUSIVE = 2;
 
 export type StrenuousConsultB2bBestEffortMeta = {
-  /** Number of strenuous-related audit lines (B2B + 3-in-a-row) in the saved schedule. */
+  /** Total month-boundaries where a resident has consecutive strenuous consult months. */
+  totalStrenuousB2bEdges: number;
+  /** Residents with more than one such boundary in the year (goal: 0). */
+  residentsOverOne: number;
+  /** @deprecated use totalStrenuousB2bEdges */
   violationCount: number;
-  /** Same as {@link STRENUOUS_B2B_BEST_EFFORT_TARGET_MAX_EXCLUSIVE}. */
   targetMaxExclusive: number;
 };
 
@@ -1387,15 +1459,30 @@ export type GenerateScheduleResult = {
    * (search budget exhausted). Schedule is still the lexicographically best attempt found.
    */
   strenuousConsultB2bBestEffort?: StrenuousConsultB2bBestEffortMeta;
+  /** Saved the closest match: some rotation month counts still differ from requirements. */
+  requirementsPartial?: boolean;
 };
 
-/** UX copy when a best-effort schedule is returned while {@link STRENUOUS_B2B_BEST_EFFORT_TARGET_MAX_EXCLUSIVE} is not met. */
+/** UX copy when a best-effort schedule is returned for strenuous spacing. */
 export function formatStrenuousBestEffortBanner(meta: StrenuousConsultB2bBestEffortMeta): string {
-  const { violationCount, targetMaxExclusive } = meta;
-  if (violationCount < targetMaxExclusive) {
-    return `${violationCount} strenuous consult spacing violation(s)—under goal of fewer than ${targetMaxExclusive}. Review details below.`;
+  const { totalStrenuousB2bEdges, residentsOverOne, violationCount, targetMaxExclusive } = meta;
+  const edges = totalStrenuousB2bEdges ?? violationCount;
+  const parts: string[] = [];
+  if (residentsOverOne > 0) {
+    parts.push(
+      `${residentsOverOne} resident(s) have more than one back-to-back strenuous consult stretch (goal: at most one per resident).`
+    );
   }
-  return `Best schedule in search time has ${violationCount} strenuous consult spacing violation(s) (goal: fewer than ${targetMaxExclusive}). Review the audit, or adjust capacity/requirements and generate again.`;
+  if (edges > 0) {
+    parts.push(`${edges} total strenuous back-to-back month edge(s) (minimize).`);
+  }
+  if (parts.length > 0) {
+    return parts.join(" ") + " See soft-rule warnings below.";
+  }
+  if (edges < targetMaxExclusive) {
+    return `${edges} strenuous consult spacing edge(s)—under legacy goal < ${targetMaxExclusive}. Review details below.`;
+  }
+  return `Best schedule in search time has ${edges} strenuous B2B edge(s) (goal: fewer than ${targetMaxExclusive}). Review the audit, or adjust and generate again.`;
 }
 
 /**
@@ -1506,7 +1593,8 @@ export async function generateSchedule({
         audit: ScheduleAudit;
         attempt: number;
         seed: number;
-        strenuousConsultBackToBackViolations: number;
+        strenuousMetrics: { totalEdges: number; residentsOverOne: number };
+        strenuousAuditLines: number;
         transplantBackToBackViolations: number;
       }
     | null = null;
@@ -1518,7 +1606,8 @@ export async function generateSchedule({
         attempt: number;
         seed: number;
         requirementViolations: number;
-        strenuousConsultBackToBackViolations: number;
+        strenuousMetrics: { totalEdges: number; residentsOverOne: number };
+        strenuousAuditLines: number;
         transplantBackToBackViolations: number;
         softCount: number;
       }
@@ -1545,20 +1634,61 @@ export async function generateSchedule({
     return next.softCount < prev.softCount;
   };
 
-  const staticData = await loadSchedulerStaticData({ supabaseAdmin, academicYearId });
-  /** When true, we prefer zero strenuous spacing violations but fall back to the best schedule found (fewest violations first). */
-  const prioritizeStrenuousSpacing = staticData.avoidBackToBackConsult === true;
+  const isBetterPrioritize = (
+    next: {
+      sm: { totalEdges: number; residentsOverOne: number };
+      strenuousAuditLines: number;
+      transplant: number;
+      soft: number;
+    },
+    prev: {
+      sm: { totalEdges: number; residentsOverOne: number };
+      strenuousAuditLines: number;
+      transplant: number;
+      soft: number;
+    }
+  ): boolean => {
+    if (isBetterStrenuousMetrics(next.sm, prev.sm)) return true;
+    if (isBetterStrenuousMetrics(prev.sm, next.sm)) return false;
+    if (next.strenuousAuditLines !== prev.strenuousAuditLines) {
+      return next.strenuousAuditLines < prev.strenuousAuditLines;
+    }
+    if (next.transplant !== prev.transplant) return next.transplant < prev.transplant;
+    return next.soft < prev.soft;
+  };
 
-  // Retry budget: more attempts + wall time when "avoid B2B consult" is on (harder search space).
-  const maxAttempts = staticData.avoidBackToBackConsult ? 320 : 120;
-  const deadlineTs = Date.now() + (staticData.avoidBackToBackConsult ? 120000 : 45000);
+  const staticData = await loadSchedulerStaticData({ supabaseAdmin, academicYearId });
+  const prioritizeStrenuousSpacing = staticData.avoidBackToBackConsult === true;
+  const strenuousRotationIds = buildStrenuousConsultRotationIds(staticData.rotationsList);
+
+  const maxAttempts = staticData.avoidBackToBackConsult ? 160 : 100;
+  const deadlineTs = Date.now() + (staticData.avoidBackToBackConsult ? 90000 : 45000);
+
+  const metaFrom = (
+    audit: ScheduleAudit,
+    sm: { totalEdges: number; residentsOverOne: number }
+  ): StrenuousConsultB2bBestEffortMeta => {
+    const auditLines = countStrenuousConsultBackToBackViolations(audit);
+    return {
+      totalStrenuousB2bEdges: sm.totalEdges,
+      residentsOverOne: sm.residentsOverOne,
+      violationCount: auditLines,
+      targetMaxExclusive: STRENUOUS_B2B_BEST_EFFORT_TARGET_MAX_EXCLUSIVE,
+    };
+  };
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (Date.now() >= deadlineTs) break;
     const seed = (baseSeed + attempt) >>> 0;
     const { assignmentRows, audit } = await buildScheduleVariation({ staticData, seed, deadlineTs });
 
-    const strenuousConsultBackToBackViolations = countStrenuousConsultBackToBackViolations(audit);
+    const strenuousMetrics = computeStrenuousB2BMetrics(
+      assignmentRows,
+      staticData.monthsList,
+      staticData.residentsList,
+      strenuousRotationIds
+    );
+    const strenuousAuditLines = countStrenuousConsultBackToBackViolations(audit);
     const transplantBackToBackViolations = audit.softRuleViolations.filter((v) =>
       v.rule.startsWith("Back-to-back transplant:")
     ).length;
@@ -1566,28 +1696,27 @@ export async function generateSchedule({
     const reqViolCount = audit.requirementViolations.length;
     const softCount = audit.softRuleViolations.length;
 
-    // Global best over all attempts (requirement violations first), for last-resort fallback when
-    // no attempt satisfies every requirement, or if strenuous-specific logic did not persist earlier.
-    if (
-      !bestAny ||
-      reqViolCount < bestAny.requirementViolations ||
-      (reqViolCount === bestAny.requirementViolations &&
-        strenuousConsultBackToBackViolations < bestAny.strenuousConsultBackToBackViolations) ||
-      (reqViolCount === bestAny.requirementViolations &&
-        strenuousConsultBackToBackViolations === bestAny.strenuousConsultBackToBackViolations &&
-        transplantBackToBackViolations < bestAny.transplantBackToBackViolations) ||
-      (reqViolCount === bestAny.requirementViolations &&
-        strenuousConsultBackToBackViolations === bestAny.strenuousConsultBackToBackViolations &&
-        transplantBackToBackViolations === bestAny.transplantBackToBackViolations &&
-        softCount < bestAny.softCount)
-    ) {
+    let betterAny = false;
+    if (!bestAny) betterAny = true;
+    else if (reqViolCount < bestAny.requirementViolations) betterAny = true;
+    else if (reqViolCount > bestAny.requirementViolations) betterAny = false;
+    else if (isBetterStrenuousMetrics(strenuousMetrics, bestAny.strenuousMetrics)) betterAny = true;
+    else if (isBetterStrenuousMetrics(bestAny.strenuousMetrics, strenuousMetrics)) betterAny = false;
+    else if (strenuousAuditLines < bestAny.strenuousAuditLines) betterAny = true;
+    else if (strenuousAuditLines > bestAny.strenuousAuditLines) betterAny = false;
+    else if (transplantBackToBackViolations < bestAny.transplantBackToBackViolations) betterAny = true;
+    else if (transplantBackToBackViolations > bestAny.transplantBackToBackViolations) betterAny = false;
+    else betterAny = softCount < bestAny.softCount;
+
+    if (betterAny) {
       bestAny = {
         assignmentRows,
         audit,
         attempt,
         seed,
         requirementViolations: reqViolCount,
-        strenuousConsultBackToBackViolations,
+        strenuousMetrics,
+        strenuousAuditLines,
         transplantBackToBackViolations,
         softCount,
       };
@@ -1597,7 +1726,12 @@ export async function generateSchedule({
     if (!hardOk) continue;
 
     if (prioritizeStrenuousSpacing) {
-      if (strenuousConsultBackToBackViolations < STRENUOUS_B2B_BEST_EFFORT_TARGET_MAX_EXCLUSIVE) {
+      // Per-resident cap is the primary goal; then minimize total B2B edges and audit severity.
+      if (
+        strenuousMetrics.residentsOverOne === 0 &&
+        strenuousMetrics.totalEdges === 0 &&
+        transplantBackToBackViolations === 0
+      ) {
         const scheduleVersionId = await persistSchedule({
           supabaseAdmin,
           academicYearId,
@@ -1605,46 +1739,58 @@ export async function generateSchedule({
           attempt,
           assignmentRows,
         });
-        if (strenuousConsultBackToBackViolations === 0) {
+        return { scheduleVersionId, audit };
+      }
+
+      // Fast win: meet per-resident rule (≤1 B2B block each) with no transplant B2B — acceptable soft warnings for remaining global edges.
+      if (strenuousMetrics.residentsOverOne === 0 && transplantBackToBackViolations === 0) {
+        const scheduleVersionId = await persistSchedule({
+          supabaseAdmin,
+          academicYearId,
+          seed,
+          attempt,
+          assignmentRows,
+        });
+        if (strenuousMetrics.totalEdges === 0 && strenuousAuditLines === 0) {
           return { scheduleVersionId, audit };
         }
         return {
           scheduleVersionId,
           audit,
-          strenuousConsultB2bBestEffort: {
-            violationCount: strenuousConsultBackToBackViolations,
-            targetMaxExclusive: STRENUOUS_B2B_BEST_EFFORT_TARGET_MAX_EXCLUSIVE,
-          },
+          strenuousConsultB2bBestEffort: metaFrom(audit, strenuousMetrics),
         };
       }
-      const nextFallback = {
-        strenuousConsultBackToBackViolations,
-        transplantBackToBackViolations,
-        softCount,
-      };
-      const prevFallback = bestHard
+
+      const prevP = bestHard
         ? {
-            strenuousConsultBackToBackViolations: bestHard.strenuousConsultBackToBackViolations,
-            transplantBackToBackViolations: bestHard.transplantBackToBackViolations,
-            softCount: bestSoft,
+            sm: bestHard.strenuousMetrics,
+            strenuousAuditLines: bestHard.strenuousAuditLines,
+            transplant: bestHard.transplantBackToBackViolations,
+            soft: bestSoft,
           }
         : null;
-      if (!prevFallback || isBetterFallback(nextFallback, prevFallback)) {
+      const nextP = {
+        sm: strenuousMetrics,
+        strenuousAuditLines,
+        transplant: transplantBackToBackViolations,
+        soft: softCount,
+      };
+      if (!prevP || isBetterPrioritize(nextP, prevP)) {
         bestSoft = softCount;
         bestHard = {
           assignmentRows,
           audit,
           attempt,
           seed,
-          strenuousConsultBackToBackViolations,
+          strenuousMetrics,
+          strenuousAuditLines,
           transplantBackToBackViolations,
         };
       }
       continue;
     }
 
-    const strictPairOk =
-      strenuousConsultBackToBackViolations === 0 && transplantBackToBackViolations === 0;
+    const strictPairOk = strenuousAuditLines === 0 && transplantBackToBackViolations === 0;
 
     if (strictPairOk && softCount <= 5) {
       const scheduleVersionId = await persistSchedule({
@@ -1658,13 +1804,13 @@ export async function generateSchedule({
     }
 
     const nextFallback = {
-      strenuousConsultBackToBackViolations,
+      strenuousConsultBackToBackViolations: strenuousAuditLines,
       transplantBackToBackViolations,
       softCount,
     };
     const prevFallback = bestHard
       ? {
-          strenuousConsultBackToBackViolations: bestHard.strenuousConsultBackToBackViolations,
+          strenuousConsultBackToBackViolations: bestHard.strenuousAuditLines,
           transplantBackToBackViolations: bestHard.transplantBackToBackViolations,
           softCount: bestSoft,
         }
@@ -1677,7 +1823,8 @@ export async function generateSchedule({
         audit,
         attempt,
         seed,
-        strenuousConsultBackToBackViolations,
+        strenuousMetrics,
+        strenuousAuditLines,
         transplantBackToBackViolations,
       };
     }
@@ -1692,20 +1839,32 @@ export async function generateSchedule({
         attempt: bestHard.attempt,
         assignmentRows: bestHard.assignmentRows,
       });
+      const needsBanner =
+        bestHard.strenuousMetrics.residentsOverOne > 0 ||
+        bestHard.strenuousMetrics.totalEdges > 0 ||
+        bestHard.strenuousAuditLines > 0;
       return {
         scheduleVersionId,
         audit: bestHard.audit,
-        ...(bestHard.strenuousConsultBackToBackViolations > 0
-          ? {
-              strenuousConsultB2bBestEffort: {
-                violationCount: bestHard.strenuousConsultBackToBackViolations,
-                targetMaxExclusive: STRENUOUS_B2B_BEST_EFFORT_TARGET_MAX_EXCLUSIVE,
-              },
-            }
+        ...(needsBanner
+          ? { strenuousConsultB2bBestEffort: metaFrom(bestHard.audit, bestHard.strenuousMetrics) }
           : {}),
       };
     }
-    throw new Error(SCHEDULE_ERROR_REQUIREMENTS_UNSATISFIABLE);
+    if (bestAny && bestAny.requirementViolations === 0) {
+      const scheduleVersionId = await persistSchedule({
+        supabaseAdmin,
+        academicYearId,
+        seed: bestAny.seed,
+        attempt: bestAny.attempt,
+        assignmentRows: bestAny.assignmentRows,
+      });
+      return {
+        scheduleVersionId,
+        audit: bestAny.audit,
+        strenuousConsultB2bBestEffort: metaFrom(bestAny.audit, bestAny.strenuousMetrics),
+      };
+    }
   }
 
   if (bestHard) {
@@ -1728,6 +1887,24 @@ export async function generateSchedule({
       assignmentRows: bestAny.assignmentRows,
     });
     return { scheduleVersionId, audit: bestAny.audit };
+  }
+
+  if (bestAny) {
+    const scheduleVersionId = await persistSchedule({
+      supabaseAdmin,
+      academicYearId,
+      seed: bestAny.seed,
+      attempt: bestAny.attempt,
+      assignmentRows: bestAny.assignmentRows,
+    });
+    return {
+      scheduleVersionId,
+      audit: bestAny.audit,
+      requirementsPartial: true,
+      ...(prioritizeStrenuousSpacing
+        ? { strenuousConsultB2bBestEffort: metaFrom(bestAny.audit, bestAny.strenuousMetrics) }
+        : {}),
+    };
   }
 
   throw new Error(SCHEDULE_ERROR_REQUIREMENTS_UNSATISFIABLE);
