@@ -1142,7 +1142,7 @@ async function buildScheduleVariation({
 
   // Strictly reduce soft pair violations (strenuous consult b2b has lexicographic priority via deltaPairScoreForSwap).
   let pairScore = totalPairScore();
-  const MAX_SOFT_ITERS = avoidBackToBackConsult ? 1200 : 700;
+  const MAX_SOFT_ITERS = avoidBackToBackConsult ? 2200 : 900;
 
   // Allow the soft minimizer to escape local minima by sometimes applying
   // swaps that do not immediately reduce the targeted pairScore.
@@ -1551,12 +1551,9 @@ export async function generateSchedule({
   /** When true, we prefer zero strenuous spacing violations but fall back to the best schedule found (fewest violations first). */
   const prioritizeStrenuousSpacing = staticData.avoidBackToBackConsult === true;
 
-  // When avoiding back-to-back strenuous consults, increase retry budget to
-  // give the in-memory repair/minimizer enough opportunity to discover a
-  // zero-violation arrangement (if one exists).
-  const maxAttempts = staticData.avoidBackToBackConsult ? 120 : 40;
-  // Hard wall-clock budget (strenuous mode needs more seeds to hit satisfiable requirements + spacing).
-  const deadlineTs = Date.now() + (staticData.avoidBackToBackConsult ? 28000 : 8000);
+  // Retry budget: more attempts + wall time when "avoid B2B consult" is on (harder search space).
+  const maxAttempts = staticData.avoidBackToBackConsult ? 320 : 120;
+  const deadlineTs = Date.now() + (staticData.avoidBackToBackConsult ? 120000 : 45000);
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (Date.now() >= deadlineTs) break;
