@@ -1597,7 +1597,7 @@ export function buildFeasibilityReport(
         example: prev.example,
       });
     }
-    for (const [rotName, { short: _s, example }] of byRot) {
+    for (const [rotName, { example }] of byRot) {
       suggestions.push(
         `The schedule is still missing time on ${rotName} for someone (for example ${example}). In Setup, either increase how many residents that service can take each month, or reduce how many months of ${rotName} are required—and generate again.`
       );
