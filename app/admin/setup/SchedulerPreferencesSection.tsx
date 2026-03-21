@@ -244,7 +244,13 @@ export function SchedulerPreferencesSection({ programId: programIdProp }: { prog
       checked: avoidBackToBackConsult,
       onChange: handleAvoidBackToBackToggle,
     },
-    { id: "no-consult-vacation", label: "Do not assign consult in months when resident has vacation", checked: noConsultWhenVacationInMonth, onChange: handleNoConsultWhenVacationToggle },
+    {
+      id: "no-consult-vacation",
+      label:
+        "Prefer not to put consult or strenuous rotations in a month where the resident has vacation. The scheduler tries that first, then may allow it if needed to meet requirements or improve back-to-back consult spacing (audit warns when it happens).",
+      checked: noConsultWhenVacationInMonth,
+      onChange: handleNoConsultWhenVacationToggle,
+    },
     { id: "primary-site-long-vacation", label: "Prefer primary-site rotations for residents with more than one week vacation", checked: preferPrimarySiteForLongVacation, onChange: handlePreferPrimarySiteForLongVacationToggle },
   ];
 

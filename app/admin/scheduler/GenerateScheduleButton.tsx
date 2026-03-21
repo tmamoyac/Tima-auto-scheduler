@@ -34,7 +34,6 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
         ts: number;
         strenuousBestEffortBanner?: string | null;
         feasibilityReport?: FeasibilityReport | null;
-        requirementsPartial?: boolean;
       };
       if (!parsed || parsed.programId !== programId) return;
 
@@ -47,16 +46,11 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
 
       const reqViol = parsed.audit.requirementViolations.length;
       const softViol = parsed.audit.softRuleViolations.length;
-      if (
-        reqViol > 0 &&
-        (parsed.requirementsPartial || parsed.feasibilityReport)
-      ) {
+      if (reqViol > 0) {
         setMessage({
-          type: "success",
-          text: "Schedule saved as best effort. Review unmet requirements and suggested adjustments below.",
+          type: "error",
+          text: "This saved report shows unmet rotation requirements (older run). Generate a new schedule.",
         });
-      } else if (reqViol > 0) {
-        setMessage({ type: "error", text: "Hard requirements were not met (unexpected)." });
       } else if (softViol > 0) {
         setMessage({
           type: "success",
@@ -111,7 +105,6 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
     extras: {
       strenuousBestEffortBanner: string | null;
       feasibilityReport: FeasibilityReport | null;
-      requirementsPartial?: boolean;
     }
   ) {
     return JSON.stringify({
@@ -120,7 +113,6 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
       ts: Date.now(),
       strenuousBestEffortBanner: extras.strenuousBestEffortBanner,
       feasibilityReport: extras.feasibilityReport ?? undefined,
-      requirementsPartial: extras.requirementsPartial,
     });
   }
 
@@ -140,7 +132,6 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
         scheduleVersionId?: string;
         audit?: ScheduleAudit;
         strenuousConsultB2bBestEffort?: StrenuousConsultB2bBestEffortMeta;
-        requirementsPartial?: boolean;
         feasibilityReport?: FeasibilityReport;
       } = {};
       if (contentType.includes("application/json")) {
@@ -191,34 +182,12 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
       if (effortBanner) setStrenuousBestEffortBanner(effortBanner);
       if (data.feasibilityReport) setFeasibilityReport(data.feasibilityReport);
 
-      const savedVersionWithGaps =
-        data.requirementsPartial === true ||
-        (Boolean(scheduleVersionId) && reqViol > 0);
-
       if (reqViol > 0) {
         setAudit(a);
-        if (savedVersionWithGaps) {
-          setMessage({
-            type: "success",
-            text: "Schedule saved as best effort: some rotation requirements still don’t match. See “What to adjust” below, then fix in Setup or manually. Reloading…",
-          });
-          try {
-            sessionStorage.setItem(
-              "scheduleAuditReport",
-              scheduleAuditPayload(a, {
-                strenuousBestEffortBanner: effortBanner,
-                feasibilityReport: data.feasibilityReport ?? null,
-                requirementsPartial: true,
-              })
-            );
-          } catch {
-            // ignore
-          }
-          if (redirectUrl) window.location.assign(redirectUrl);
-          else window.location.reload();
-          return;
-        }
-        setMessage({ type: "error", text: "Hard requirements were not met (unexpected)." });
+        setMessage({
+          type: "error",
+          text: "Hard requirements were not met (unexpected). This should not happen—try generating again or check Setup.",
+        });
         return;
       }
 
