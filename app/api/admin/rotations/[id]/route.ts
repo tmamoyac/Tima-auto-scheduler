@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { directorAuthErrorResponse } from "@/lib/auth/directorContext";
 import { getProgramContextForRequest, getProgramIdFromRequest } from "@/lib/auth/schedulerContext";
+import { normalizeVacationOverlapPolicy } from "@/lib/scheduler/vacationOverlapPolicy";
 
 export async function PATCH(
   request: NextRequest,
@@ -35,6 +36,9 @@ export async function PATCH(
     updates.is_back_to_back_consult_blocker = Boolean(body.is_back_to_back_consult_blocker);
   if (body.is_transplant !== undefined) updates.is_transplant = Boolean(body.is_transplant);
   if (body.is_primary_site !== undefined) updates.is_primary_site = Boolean(body.is_primary_site);
+  if (body.vacation_overlap_policy !== undefined) {
+    updates.vacation_overlap_policy = normalizeVacationOverlapPolicy(body.vacation_overlap_policy);
+  }
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });
   }

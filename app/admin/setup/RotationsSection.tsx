@@ -6,6 +6,17 @@ import { apiFetch } from "@/lib/apiFetch";
 import { safeParseJson } from "@/lib/fetchJson";
 import { ActionsMenu } from "./ActionsMenu";
 
+const VACATION_OVERLAP_OPTIONS = [
+  { value: "allowed", label: "Okay during vacation" },
+  { value: "avoid", label: "Try to avoid during vacation" },
+  { value: "prohibited", label: "Never schedule during vacation" },
+] as const;
+
+function vacationOverlapLabel(policy: string | undefined): string {
+  const p = (policy ?? "allowed").toLowerCase();
+  return VACATION_OVERLAP_OPTIONS.find((o) => o.value === p)?.label ?? "Okay during vacation";
+}
+
 type Rotation = {
   id: string;
   name: string;
@@ -16,6 +27,7 @@ type Rotation = {
   is_back_to_back_consult_blocker?: boolean;
   is_transplant?: boolean;
   is_primary_site?: boolean;
+  vacation_overlap_policy?: string;
 };
 
 export function RotationsSection({
@@ -44,6 +56,7 @@ export function RotationsSection({
     is_back_to_back_consult_blocker: false,
     is_transplant: false,
     is_primary_site: false,
+    vacation_overlap_policy: "allowed",
   });
   const [saving, setSaving] = useState(false);
 
@@ -91,6 +104,7 @@ export function RotationsSection({
       is_back_to_back_consult_blocker: false,
       is_transplant: false,
       is_primary_site: false,
+      vacation_overlap_policy: "allowed",
     });
   };
 
@@ -106,6 +120,10 @@ export function RotationsSection({
       is_back_to_back_consult_blocker: r.is_back_to_back_consult_blocker === true,
       is_transplant: r.is_transplant === true,
       is_primary_site: r.is_primary_site === true,
+      vacation_overlap_policy:
+        r.vacation_overlap_policy === "avoid" || r.vacation_overlap_policy === "prohibited"
+          ? r.vacation_overlap_policy
+          : "allowed",
     });
   };
 
@@ -169,10 +187,11 @@ export function RotationsSection({
         <div className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3">
           <p className="text-sm text-indigo-900">
             <span className="font-semibold">How it works:</span>{" "}
-            <strong>1/mo</strong> = max residents per month •{" "}
-            <strong>1-5</strong> = eligible PGY levels •{" "}
+            <strong>N/mo</strong> (capacity) = at most <strong>N residents</strong> on that rotation in <strong>one calendar month</strong>, counting everyone together (e.g.{" "}
+            <strong>1/mo</strong> one slot, <strong>2/mo</strong> two).{" "}
+            <strong>1–5</strong> = eligible PGY levels.{" "}
             <strong>Consult</strong> / <strong>Transplant</strong> = special types (scheduler can avoid back-to-back months when enabled in rules).{" "}
-            <strong>Primary site</strong> = rotations at your main site; used when &quot;Prefer primary-site for long vacation&quot; is on in Scheduling Rules.
+            <strong>Primary site</strong> = main-site rotations; used when &quot;Prefer primary-site for long vacation&quot; is on.
           </p>
         </div>
         {loading ? (
@@ -185,10 +204,14 @@ export function RotationsSection({
               {list.map((r) => (
                 <div
                   key={r.id}
-                  className="flex items-center gap-4 py-3 first:pt-0"
+                  id={`rotation-row-${r.id}`}
+                  className="flex items-center gap-4 py-3 first:pt-0 scroll-mt-24"
                 >
                   <div className="flex-1 min-w-0">
                     <span className="text-sm font-medium text-gray-900">{r.name}</span>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Vacation overlap policy: {vacationOverlapLabel(r.vacation_overlap_policy)}
+                    </p>
                   </div>
                   <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 shrink-0">
                     {r.capacity_per_month}/mo
@@ -308,6 +331,25 @@ export function RotationsSection({
                   />
                   Primary site
                 </label>
+                <label className="flex flex-col gap-0.5 text-sm">
+                  <span className="font-medium text-gray-800">Vacation overlap policy</span>
+                  <select
+                    value={form.vacation_overlap_policy}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        vacation_overlap_policy: e.target.value as (typeof VACATION_OVERLAP_OPTIONS)[number]["value"],
+                      }))
+                    }
+                    className="rounded-lg border border-gray-300 px-2 py-1.5 min-w-[14rem]"
+                  >
+                    {VACATION_OVERLAP_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <button
                   type="button"
                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg disabled:opacity-50"
@@ -331,6 +373,7 @@ export function RotationsSection({
                       is_back_to_back_consult_blocker: false,
                       is_transplant: false,
                       is_primary_site: false,
+                      vacation_overlap_policy: "allowed",
                     });
                   }}
                 >
@@ -347,6 +390,10 @@ export function RotationsSection({
   return (
     <section className="mb-10">
       <h2 className="text-xl font-semibold mb-3">Rotations</h2>
+      <p className="text-sm text-gray-600 mb-3 max-w-2xl">
+        <strong>Capacity/month</strong> is the maximum number of residents on that rotation in a single month (shared across all residents). For example,{" "}
+        <strong>2</strong> means two people can be on that service in the same month.
+      </p>
       {loading ? (
         <p className="text-sm text-gray-500">Loading…</p>
       ) : error ? (
@@ -363,12 +410,13 @@ export function RotationsSection({
                 <th className="border border-gray-300 bg-gray-100 p-2 text-left">Strenuous consult blocker</th>
                 <th className="border border-gray-300 bg-gray-100 p-2 text-left">Transplant</th>
                 <th className="border border-gray-300 bg-gray-100 p-2 text-left">Primary site</th>
+                <th className="border border-gray-300 bg-gray-100 p-2 text-left">Vacation overlap policy</th>
                 <th className="border border-gray-300 bg-gray-100 p-2 text-left">Actions</th>
               </tr>
             </thead>
             <tbody>
               {list.map((r) => (
-                <tr key={r.id}>
+                <tr key={r.id} id={`rotation-row-${r.id}`} className="scroll-mt-24">
                   <td className="border border-gray-300 p-2">{r.name}</td>
                   <td className="border border-gray-300 p-2">{r.capacity_per_month}</td>
                   <td className="border border-gray-300 p-2">
@@ -380,6 +428,9 @@ export function RotationsSection({
                   </td>
                   <td className="border border-gray-300 p-2">{r.is_transplant ? "Yes" : "No"}</td>
                   <td className="border border-gray-300 p-2">{r.is_primary_site ? "Yes" : "No"}</td>
+                  <td className="border border-gray-300 p-2 text-xs max-w-[12rem]">
+                    {vacationOverlapLabel(r.vacation_overlap_policy)}
+                  </td>
                   <td className="border border-gray-300 p-2">
                     <button
                       type="button"
@@ -482,6 +533,25 @@ export function RotationsSection({
                   />
                   Primary site
                 </label>
+                <label className="flex flex-col gap-0.5 text-sm">
+                  <span className="font-medium text-gray-800">Vacation overlap policy</span>
+                  <select
+                    value={form.vacation_overlap_policy}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        vacation_overlap_policy: e.target.value as (typeof VACATION_OVERLAP_OPTIONS)[number]["value"],
+                      }))
+                    }
+                    className="border border-gray-300 rounded px-2 py-1 min-w-[14rem]"
+                  >
+                    {VACATION_OVERLAP_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <button
                   type="button"
                   className="px-3 py-1.5 bg-blue-600 text-white rounded"
@@ -505,6 +575,7 @@ export function RotationsSection({
                       is_back_to_back_consult_blocker: false,
                       is_transplant: false,
                       is_primary_site: false,
+                      vacation_overlap_policy: "allowed",
                     });
                   }}
                 >

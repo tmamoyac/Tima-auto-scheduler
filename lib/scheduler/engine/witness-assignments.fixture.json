@@ -1,0 +1,14 @@
+[
+  { "resident_id": "witness_res_hannah", "month_id": "witness_m_0", "rotation_id": "witness_rot_irvine_c" },
+  { "resident_id": "witness_res_hannah", "month_id": "witness_m_1", "rotation_id": "witness_rot_orange_c2" },
+  { "resident_id": "witness_res_hannah", "month_id": "witness_m_2", "rotation_id": "witness_rot_uci_dia" },
+  { "resident_id": "witness_res_hannah", "month_id": "witness_m_3", "rotation_id": "witness_rot_orange_c1" },
+  { "resident_id": "witness_res_hannah", "month_id": "witness_m_4", "rotation_id": "witness_rot_va_con" },
+  { "resident_id": "witness_res_hannah", "month_id": "witness_m_5", "rotation_id": "witness_rot_va_dial" },
+  { "resident_id": "witness_res_hannah", "month_id": "witness_m_6", "rotation_id": "witness_rot_va_elec" },
+  { "resident_id": "witness_res_hannah", "month_id": "witness_m_7", "rotation_id": "witness_rot_trans" },
+  { "resident_id": "witness_res_hannah", "month_id": "witness_m_8", "rotation_id": "witness_rot_orange_c2" },
+  { "resident_id": "witness_res_hannah", "month_id": "witness_m_9", "rotation_id": "witness_rot_irvine_c" },
+  { "resident_id": "witness_res_hannah", "month_id": "witness_m_10", "rotation_id": "witness_rot_uci_dia" },
+  { "resident_id": "witness_res_hannah", "month_id": "witness_m_11", "rotation_id": "witness_rot_orange_c1" }
+]

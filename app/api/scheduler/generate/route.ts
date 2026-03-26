@@ -7,7 +7,11 @@ import {
   generateSchedule,
   SCHEDULE_ERROR_REQUIREMENTS_UNSATISFIABLE,
   ScheduleUnsatError,
+  ScheduleVacationOverlapFixedBlockError,
 } from "@/lib/scheduler/generateSchedule";
+
+/** Must be a static number for Next.js route config (≈90s search + DB + slack). */
+export const maxDuration = 120;
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
@@ -20,20 +24,42 @@ export async function POST(request: NextRequest) {
     const ctx = await getProgramContextForRequest(supabase, supabaseAdmin, programIdFromQuery);
     if (!ctx.academicYearId) return jsonError("No academic year found for program", 400);
 
+    let omitFixedAssignmentRules = false;
+    try {
+      const ct = request.headers.get("content-type") ?? "";
+      if (ct.includes("application/json")) {
+        const body = (await request.json()) as { omitFixedAssignmentRules?: boolean };
+        omitFixedAssignmentRules = body?.omitFixedAssignmentRules === true;
+      }
+    } catch {
+      omitFixedAssignmentRules = false;
+    }
+
     const result = await generateSchedule({
       supabaseAdmin: ctx.supabase,
       academicYearId: ctx.academicYearId,
+      omitFixedAssignmentRules,
     });
     return NextResponse.json(result);
   } catch (err) {
     const res = directorAuthErrorResponse(err);
     if (res) return jsonError(res.error, res.status);
+    if (err instanceof ScheduleVacationOverlapFixedBlockError) {
+      return NextResponse.json(
+        {
+          error: err.message,
+          vacation_overlap_blocked: err.vacation_overlap_blocked,
+        },
+        { status: 422 }
+      );
+    }
     if (err instanceof ScheduleUnsatError) {
       return NextResponse.json(
         {
-          error:
-            "We couldn’t build a schedule with your current setup. Read the blue “how to fix this” section below for simple changes to try (usually capacity or requirements).",
+          error: "Schedule generation failed.",
           feasibilityReport: err.feasibilityReport,
+          schedulerEngineUsed: err.schedulerEngineUsed,
+          witnessFirstFailure: err.witnessFirstFailure ?? null,
         },
         { status: 422 }
       );

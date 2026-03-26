@@ -240,7 +240,8 @@ export function SchedulerPreferencesSection({ programId: programIdProp }: { prog
     { id: "transplant", label: "Avoid back-to-back transplant months", checked: avoidBackToBackTransplant, onChange: handleAvoidBackToBackTransplantToggle },
     {
       id: "consult",
-      label: "Avoid back-to-back strenuous consult rotations",
+      label:
+        "Avoid back-to-back strenuous consult rotations (hard rule when on: no consecutive consult months). Mark every consult-style rotation as “Consult” in Rotations (or use “blocker” flags); otherwise Orange vs VA Consult won’t count as back-to-back. The generator avoids spacing in construction, cross-resident swaps, and repair.",
       checked: avoidBackToBackConsult,
       onChange: handleAvoidBackToBackToggle,
     },

@@ -1,21 +1,95 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/apiFetch";
 import {
   formatStrenuousBestEffortBanner,
+  SCHEDULE_SEARCH_BUDGET_MS,
   type FeasibilityReport,
   type ScheduleAudit,
   type StrenuousConsultB2bBestEffortMeta,
-} from "@/lib/scheduler/generateSchedule";
+  type VacationOverlapBlocked,
+  type VacationOverlapDetailRow,
+  type VacationOverlapSummary,
+} from "@/lib/scheduler/scheduleClientShare";
 
-export function GenerateScheduleButton({ programId }: { programId: string }) {
+/** Server search budget plus persist / network slack — whole client wait including auth. */
+const CLIENT_GENERATE_TIMEOUT_MS = SCHEDULE_SEARCH_BUDGET_MS + 75_000;
+
+function schedulerSetupHref(opts: {
+  programId: string;
+  academicYearId: string;
+  viewParam: string;
+  hash: string;
+}): string {
+  const q = new URLSearchParams();
+  q.set("tab", "setup");
+  q.set("programId", opts.programId);
+  if (opts.academicYearId) q.set("academicYearId", opts.academicYearId);
+  if (opts.viewParam) q.set("view", opts.viewParam);
+  const h = opts.hash.startsWith("#") ? opts.hash : `#${opts.hash}`;
+  return `/admin/scheduler?${q.toString()}${h}`;
+}
+
+function vacationSummaryFromDetails(rows: VacationOverlapDetailRow[]): VacationOverlapSummary {
+  return {
+    prohibited_violation_count: rows.filter((r) => r.policy === "Prohibited").length,
+    avoid_used_count: rows.filter((r) => r.policy === "Avoid").length,
+  };
+}
+
+function parseVacationDetailsPayload(raw: unknown): VacationOverlapDetailRow[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => {
+    const r = item as Partial<VacationOverlapDetailRow>;
+    return {
+      resident_id: r.resident_id ?? "",
+      resident_name: r.resident_name ?? "",
+      month_id: r.month_id ?? "",
+      month_label: r.month_label ?? "",
+      rotation_id: r.rotation_id ?? "",
+      rotation_name: r.rotation_name ?? "",
+      policy: r.policy === "Prohibited" ? "Prohibited" : "Avoid",
+      overlapping_vacation_start: r.overlapping_vacation_start ?? "",
+      overlapping_vacation_end: r.overlapping_vacation_end ?? "",
+      from_fixed_rule: r.from_fixed_rule === true,
+      fixed_rule_id: r.fixed_rule_id ?? null,
+    };
+  });
+}
+
+export function GenerateScheduleButton({
+  programId,
+  omitFixedAssignmentRules = false,
+  buttonLabel,
+  buttonClassName,
+}: {
+  programId: string;
+  /** When true, POST JSON `{ omitFixedAssignmentRules: true }` so the solver skips DB fixed pins (one-off generate). */
+  omitFixedAssignmentRules?: boolean;
+  buttonLabel?: string;
+  buttonClassName?: string;
+}) {
   const [loading, setLoading] = useState(false);
+  /** True only after the request is actually in flight (past auth), so the button doesn’t look stuck on “Generating…”. */
+  const [serverContact, setServerContact] = useState(false);
+  const runEpochRef = useRef(0);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [audit, setAudit] = useState<ScheduleAudit | null>(null);
   const [feasibilityReport, setFeasibilityReport] = useState<FeasibilityReport | null>(null);
   const [strenuousBestEffortBanner, setStrenuousBestEffortBanner] = useState<string | null>(null);
+  /** Explains whether CP-SAT or the legacy heuristic produced a failed generate response. */
+  const [engineBanner, setEngineBanner] = useState<string | null>(null);
+  /** Populated on 422 when server validates SCHEDULER_WITNESS_ASSIGNMENTS_JSON against hard rules. */
+  const [witnessFirstFailure, setWitnessFirstFailure] = useState<string | null>(null);
+  const [vacationSummary, setVacationSummary] = useState<VacationOverlapSummary | null>(null);
+  const [vacationDetails, setVacationDetails] = useState<VacationOverlapDetailRow[]>([]);
+  /** Fixed pin blocked generate (prohibited rotation + vacation overlap month). */
+  const [vacationBlocked, setVacationBlocked] = useState<VacationOverlapBlocked | null>(null);
+  /** After clearing the fixed pin that blocked generate, until the next generate attempt. */
+  const [vacationPinResolvedNote, setVacationPinResolvedNote] = useState<string | null>(null);
+  const [clearingFixedRuleId, setClearingFixedRuleId] = useState<string | null>(null);
   const searchParams = useSearchParams();
 
   const academicYearId =
@@ -34,6 +108,8 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
         ts: number;
         strenuousBestEffortBanner?: string | null;
         feasibilityReport?: FeasibilityReport | null;
+        vacation_overlap_summary?: VacationOverlapSummary;
+        vacation_overlap_details?: VacationOverlapDetailRow[];
       };
       if (!parsed || parsed.programId !== programId) return;
 
@@ -43,6 +119,13 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
       setAudit(parsed.audit);
       setStrenuousBestEffortBanner(parsed.strenuousBestEffortBanner ?? null);
       if (parsed.feasibilityReport) setFeasibilityReport(parsed.feasibilityReport);
+      setVacationSummary(
+        parsed.vacation_overlap_summary ?? {
+          prohibited_violation_count: 0,
+          avoid_used_count: 0,
+        }
+      );
+      setVacationDetails(parseVacationDetailsPayload(parsed.vacation_overlap_details));
 
       const reqViol = parsed.audit.requirementViolations.length;
       const softViol = parsed.audit.softRuleViolations.length;
@@ -65,6 +148,89 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
       // ignore
     }
   }, [programId]);
+
+  const scheduleAuditPayload = useCallback(
+    (
+      a: ScheduleAudit,
+      extras: {
+        strenuousBestEffortBanner: string | null;
+        feasibilityReport: FeasibilityReport | null;
+        vacation_overlap_summary: VacationOverlapSummary;
+        vacation_overlap_details: VacationOverlapDetailRow[];
+      }
+    ) =>
+      JSON.stringify({
+        programId,
+        audit: a,
+        ts: Date.now(),
+        strenuousBestEffortBanner: extras.strenuousBestEffortBanner,
+        feasibilityReport: extras.feasibilityReport ?? undefined,
+        vacation_overlap_summary: extras.vacation_overlap_summary,
+        vacation_overlap_details: extras.vacation_overlap_details,
+      }),
+    [programId]
+  );
+
+  const deleteFixedRule = useCallback(
+    async (ruleId: string, options?: { dismissBlockedPanel?: boolean }) => {
+      if (!ruleId) return;
+      if (!confirm("Remove this fixed assignment? You can generate again afterward.")) return;
+      setClearingFixedRuleId(ruleId);
+      try {
+        const res = await apiFetch(
+          `/api/admin/fixed-assignment-rules?id=${encodeURIComponent(ruleId)}&programId=${encodeURIComponent(programId)}`,
+          { method: "DELETE", credentials: "include" }
+        );
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        if (!res.ok) {
+          const detail = (data.error ?? "").trim() || res.statusText.trim() || `HTTP ${res.status}`;
+          throw new Error(detail);
+        }
+
+        let nextDetails: VacationOverlapDetailRow[] = [];
+        setVacationDetails((prev) => {
+          nextDetails = prev.filter((r) => r.fixed_rule_id !== ruleId);
+          return nextDetails;
+        });
+        const nextSummary = vacationSummaryFromDetails(nextDetails);
+        setVacationSummary(nextSummary);
+
+        if (options?.dismissBlockedPanel) {
+          setVacationBlocked(null);
+          setVacationPinResolvedNote(
+            "The conflicting fixed assignment was removed. You can regenerate the schedule."
+          );
+        }
+
+        setMessage({ type: "success", text: "Fixed assignment cleared" });
+
+        if (audit) {
+          try {
+            sessionStorage.setItem(
+              "scheduleAuditReport",
+              scheduleAuditPayload(audit, {
+                strenuousBestEffortBanner,
+                feasibilityReport,
+                vacation_overlap_summary: nextSummary,
+                vacation_overlap_details: nextDetails,
+              })
+            );
+          } catch {
+            // ignore
+          }
+        }
+      } catch (e) {
+        const raw = e instanceof Error ? e.message : String(e);
+        setMessage({
+          type: "error",
+          text: raw ? `Could not clear fixed assignment: ${raw}` : "Could not clear fixed assignment.",
+        });
+      } finally {
+        setClearingFixedRuleId(null);
+      }
+    },
+    [programId, audit, strenuousBestEffortBanner, feasibilityReport, scheduleAuditPayload]
+  );
 
   // If the audit shows issues but feasibilityReport was missing (old deploy, sessionStorage gap, etc.),
   // load hints from the server using current program setup + this audit.
@@ -100,32 +266,55 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
     };
   }, [academicYearId, programId, audit, feasibilityReport]);
 
-  function scheduleAuditPayload(
-    audit: ScheduleAudit,
-    extras: {
-      strenuousBestEffortBanner: string | null;
-      feasibilityReport: FeasibilityReport | null;
-    }
-  ) {
-    return JSON.stringify({
-      programId,
-      audit,
-      ts: Date.now(),
-      strenuousBestEffortBanner: extras.strenuousBestEffortBanner,
-      feasibilityReport: extras.feasibilityReport ?? undefined,
-    });
-  }
-
   const handleClick = async () => {
+    const runEpoch = ++runEpochRef.current;
+    const isStale = () => runEpoch !== runEpochRef.current;
+
     setLoading(true);
+    setServerContact(false);
     setMessage(null);
     setAudit(null);
     setFeasibilityReport(null);
     setStrenuousBestEffortBanner(null);
-    try {
-      const res = await apiFetch(`/api/scheduler/generate?programId=${encodeURIComponent(programId)}`, {
+    setEngineBanner(null);
+    setWitnessFirstFailure(null);
+    setVacationSummary(null);
+    setVacationDetails([]);
+    setVacationBlocked(null);
+    setVacationPinResolvedNote(null);
+
+    const controller = new AbortController();
+    /** Timer handle — DOM `number` vs Node `Timeout`; clearTimeout accepts both. */
+    let raceTimeoutId: number | undefined;
+
+    const fetchGenerate = () =>
+      apiFetch(`/api/scheduler/generate?programId=${encodeURIComponent(programId)}`, {
         method: "POST",
+        signal: controller.signal,
+        headers: omitFixedAssignmentRules ? { "Content-Type": "application/json" } : undefined,
+        body: omitFixedAssignmentRules ? JSON.stringify({ omitFixedAssignmentRules: true }) : undefined,
       });
+
+    try {
+      // Covers hung auth (getToken) or hung server — aborts fetch and always settles the UI.
+      const res = await Promise.race([
+        fetchGenerate(),
+        new Promise<Response>((_, reject) => {
+          raceTimeoutId = window.setTimeout(() => {
+            controller.abort();
+            reject(new Error("CLIENT_TIMEOUT"));
+          }, CLIENT_GENERATE_TIMEOUT_MS) as number;
+        }),
+      ]);
+
+      if (raceTimeoutId !== undefined) {
+        window.clearTimeout(raceTimeoutId);
+        raceTimeoutId = undefined;
+      }
+
+      if (isStale()) return;
+
+      setServerContact(true);
       const contentType = res.headers.get("content-type") ?? "";
       let data: {
         error?: string;
@@ -133,11 +322,17 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
         audit?: ScheduleAudit;
         strenuousConsultB2bBestEffort?: StrenuousConsultB2bBestEffortMeta;
         feasibilityReport?: FeasibilityReport;
+        schedulerEngineUsed?: "cp_sat" | "heuristic";
+        witnessFirstFailure?: string | null;
+        vacation_overlap_summary?: VacationOverlapSummary;
+        vacation_overlap_details?: VacationOverlapDetailRow[];
+        vacation_overlap_blocked?: VacationOverlapBlocked;
       } = {};
       if (contentType.includes("application/json")) {
         data = await res.json();
       } else {
         const text = await res.text();
+        if (isStale()) return;
         if (text.startsWith("<")) {
           setMessage({
             type: "error",
@@ -152,8 +347,30 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
           return;
         }
       }
+      if (isStale()) return;
+
       if (!res.ok) {
+        const wf = data.witnessFirstFailure?.trim() ? data.witnessFirstFailure : null;
+        setWitnessFirstFailure(wf);
+        if (data.vacation_overlap_blocked) {
+          const b = data.vacation_overlap_blocked;
+          setVacationBlocked({
+            ...b,
+            fixed_rule_id: b.fixed_rule_id ?? "",
+          });
+        }
         if (data.feasibilityReport) setFeasibilityReport(data.feasibilityReport);
+        if (!wf) {
+          if (data.schedulerEngineUsed === "heuristic") {
+            setEngineBanner(
+              "This failure used the legacy randomized search, not CP-SAT — so the blue box can name example residents and mention “two phases.” To use the constraint solver: run python3 -m pip install -r scripts/requirements-cp.txt, make sure .env.local does not set SCHEDULER_ENGINE=heuristic, restart npm run dev, then generate again."
+            );
+          } else if (data.schedulerEngineUsed === "cp_sat") {
+            setEngineBanner(
+              "CP-SAT ran. If the text below says the solver proved infeasible, that is a definite “no” for the current hard rules, not the old search giving up."
+            );
+          }
+        }
         setMessage({ type: "error", text: data.error || "Failed to generate schedule" });
         return;
       }
@@ -176,52 +393,74 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
         setMessage({ type: "error", text: "Schedule generation returned no audit data." });
         return;
       }
+      if (isStale()) return;
 
       const effort = data.strenuousConsultB2bBestEffort;
       const effortBanner = effort ? formatStrenuousBestEffortBanner(effort) : null;
       if (effortBanner) setStrenuousBestEffortBanner(effortBanner);
       if (data.feasibilityReport) setFeasibilityReport(data.feasibilityReport);
 
-      if (reqViol > 0) {
-        setAudit(a);
-        setMessage({
-          type: "error",
-          text: "Hard requirements were not met (unexpected). This should not happen—try generating again or check Setup.",
-        });
-        return;
-      }
+      const vacSum = data.vacation_overlap_summary ?? {
+        prohibited_violation_count: 0,
+        avoid_used_count: 0,
+      };
+      const vacDet = parseVacationDetailsPayload(data.vacation_overlap_details);
+      setVacationSummary(vacSum);
+      setVacationDetails(vacDet);
 
-      if (softViol > 0 || effortBanner) {
-        setAudit(a);
-        setMessage({
-          type: "success",
-          text: effortBanner
-            ? "Schedule saved (best effort within search time). Reloading…"
-            : "Schedule created with soft-rule warnings (see below). Reloading…",
-        });
+      const persistAudit = () => {
         try {
           sessionStorage.setItem(
             "scheduleAuditReport",
             scheduleAuditPayload(a, {
               strenuousBestEffortBanner: effortBanner,
               feasibilityReport: data.feasibilityReport ?? null,
+              vacation_overlap_summary: vacSum,
+              vacation_overlap_details: vacDet,
             })
           );
         } catch {
           // ignore
         }
+      };
+
+      if (reqViol > 0 || softViol > 0 || effortBanner) {
+        setAudit(a);
+        const msgText =
+          reqViol > 0
+            ? "Schedule created but some rotation requirements could not be fully met (see below). Reloading…"
+            : effortBanner
+              ? "Schedule saved (best effort within search time). Reloading…"
+              : "Schedule created with soft-rule warnings (see below). Reloading…";
+        setMessage({ type: reqViol > 0 ? "error" : "success", text: msgText });
+        persistAudit();
         if (redirectUrl) window.location.assign(redirectUrl);
         else window.location.reload();
         return;
       }
 
+      setAudit(a);
       setMessage({ type: "success", text: "Schedule created! All requirements met. Refreshing…" });
+      persistAudit();
       if (redirectUrl) window.location.assign(redirectUrl);
       else window.location.reload();
     } catch (e) {
-      setMessage({ type: "error", text: e instanceof Error ? e.message : "Request failed" });
+      if (isStale()) return;
+      const msg =
+        e instanceof Error && e.message === "CLIENT_TIMEOUT"
+          ? `Generation timed out after ${Math.round(CLIENT_GENERATE_TIMEOUT_MS / 1000)}s. Try again, or run locally if your host limits function time.`
+          : e instanceof DOMException && e.name === "AbortError"
+            ? `Request was cancelled or timed out after ${Math.round(CLIENT_GENERATE_TIMEOUT_MS / 1000)}s. Try again.`
+            : e instanceof Error
+              ? e.message
+              : "Request failed";
+      setMessage({ type: "error", text: msg });
     } finally {
-      setLoading(false);
+      if (raceTimeoutId !== undefined) window.clearTimeout(raceTimeoutId);
+      if (!isStale()) {
+        setLoading(false);
+        setServerContact(false);
+      }
     }
   };
 
@@ -232,21 +471,135 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
           type="button"
           onClick={handleClick}
           disabled={loading}
-          className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          aria-busy={loading}
+          title={
+            loading
+              ? serverContact
+                ? "Working — generation can take up to about 90 seconds."
+                : "Signing you in — if this lasts more than a minute, refresh the page."
+              : omitFixedAssignmentRules
+                ? "Runs the solver without fixed_assignment_rules for this year. Does not delete them in the database."
+                : undefined
+          }
+          className={
+            buttonClassName ??
+            "rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-wait"
+          }
         >
-          {loading ? "Generating…" : "Generate new schedule"}
+          {loading
+            ? serverContact
+              ? "Generating schedule…"
+              : "Connecting…"
+            : (buttonLabel ?? "Generate new schedule")}
         </button>
         {message && (
           <span
+            role="status"
+            aria-live="polite"
             className={`text-sm ${message.type === "success" ? "text-green-600" : "text-red-600"}`}
           >
             {message.text}
           </span>
         )}
       </div>
+      {loading && (
+        <p className="mt-2 text-xs text-gray-500 max-w-xl" aria-live="polite">
+          {serverContact
+            ? "The server is building your schedule. This often takes 30–90 seconds; please keep this tab open."
+            : "Preparing your session with the server…"}
+        </p>
+      )}
 
-      {/* Full failure: no audit, but API still returns feasibility hints (e.g. 422). */}
-      {feasibilityReport && !audit && (
+      {engineBanner && !witnessFirstFailure && (
+        <div className="mt-3 max-w-2xl rounded-lg border border-amber-400 bg-amber-50 p-3 text-sm text-amber-950">
+          {engineBanner}
+        </div>
+      )}
+
+      {witnessFirstFailure && (
+        <pre className="mt-3 max-w-3xl overflow-x-auto rounded border border-neutral-300 bg-neutral-50 p-3 text-xs font-mono whitespace-pre-wrap text-neutral-900">
+          {witnessFirstFailure}
+        </pre>
+      )}
+
+      {vacationPinResolvedNote && !vacationBlocked && (
+        <div
+          className="mt-3 max-w-2xl rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950"
+          role="status"
+          aria-live="polite"
+        >
+          {vacationPinResolvedNote}
+        </div>
+      )}
+
+      {vacationBlocked && (
+        <div className="mt-3 max-w-2xl rounded-lg border border-rose-300 bg-rose-50 p-4 text-sm text-rose-950">
+          <h3 className="font-semibold text-rose-900 mb-2">Vacation overlap summary</h3>
+          <p className="mb-3 text-rose-900">
+            Generation was blocked because a fixed assignment conflicts with a rotation that does not allow vacation
+            overlap in that month.
+          </p>
+          <ul className="space-y-1.5 list-none mb-4">
+            <li>
+              <span className="font-medium text-rose-900">Resident</span> — {vacationBlocked.resident_name}
+            </li>
+            <li>
+              <span className="font-medium text-rose-900">Month</span> — {vacationBlocked.month_label}
+            </li>
+            <li>
+              <span className="font-medium text-rose-900">Rotation</span> — {vacationBlocked.rotation_name}
+            </li>
+            <li>
+              <span className="font-medium text-rose-900">Policy</span> — Prohibited
+            </li>
+            <li>
+              <span className="font-medium text-rose-900">Why it is blocked</span> — {vacationBlocked.reason}
+            </li>
+          </ul>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={schedulerSetupHref({
+                programId,
+                academicYearId,
+                viewParam,
+                hash:
+                  vacationBlocked.fixed_rule_id !== ""
+                    ? `fixed-rule-${vacationBlocked.fixed_rule_id}`
+                    : "section-fixed-assignments",
+              })}
+              className="inline-flex items-center rounded bg-rose-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-rose-800 no-underline"
+            >
+              View fixed assignment
+            </a>
+            {vacationBlocked.fixed_rule_id !== "" ? (
+              <button
+                type="button"
+                disabled={clearingFixedRuleId !== null}
+                onClick={() =>
+                  void deleteFixedRule(vacationBlocked.fixed_rule_id, { dismissBlockedPanel: true })
+                }
+                className="rounded border border-rose-400 bg-white px-3 py-1.5 text-sm font-medium text-rose-900 hover:bg-rose-100 disabled:opacity-50"
+              >
+                {clearingFixedRuleId === vacationBlocked.fixed_rule_id ? "Removing…" : "Clear this fixed assignment"}
+              </button>
+            ) : null}
+            <a
+              href={schedulerSetupHref({
+                programId,
+                academicYearId,
+                viewParam,
+                hash: `rotation-row-${vacationBlocked.rotation_id}`,
+              })}
+              className="inline-flex items-center rounded border border-rose-400 bg-white px-3 py-1.5 text-sm font-medium text-rose-900 hover:bg-rose-100 no-underline"
+            >
+              Jump to rotation settings
+            </a>
+          </div>
+        </div>
+      )}
+
+      {/* Full failure: feasibility hints when no witness-first failure to show. */}
+      {feasibilityReport && !audit && !witnessFirstFailure && (
         <div className="mt-3 max-w-2xl rounded-lg border-2 border-sky-400 bg-sky-50 p-4 text-sm text-sky-950">
           <h3 className="font-semibold text-sky-900 mb-2">How to fix this</h3>
           <p className="mb-2">{feasibilityReport.summary}</p>
@@ -318,6 +671,120 @@ export function GenerateScheduleButton({ programId }: { programId: string }) {
             <p className="mb-3 rounded border border-amber-400 bg-amber-100 px-3 py-2 font-medium text-amber-950">
               {strenuousBestEffortBanner}
             </p>
+          )}
+
+          {vacationSummary && (
+            <div className="mb-3 rounded border border-amber-200 bg-white/90 px-3 py-2.5">
+              <h4 className="font-semibold text-amber-900 mb-2">Vacation overlap summary</h4>
+              <ul className="list-none space-y-1 text-sm mb-2">
+                <li>
+                  <span className="font-medium text-amber-950">Prohibited violations</span>
+                  {": "}
+                  <span
+                    className={
+                      vacationSummary.prohibited_violation_count > 0 ? "font-semibold text-red-700" : undefined
+                    }
+                  >
+                    {vacationSummary.prohibited_violation_count}
+                  </span>
+                </li>
+                <li>
+                  <span className="font-medium text-amber-950">Avoid placements used</span>
+                  {": "}
+                  {vacationSummary.avoid_used_count}
+                </li>
+              </ul>
+              {vacationDetails.length > 0 && (
+                <details className="mt-1 text-sm">
+                  <summary className="cursor-pointer font-medium text-amber-900 select-none">
+                    Vacation overlap details
+                  </summary>
+                  <div className="mt-2 overflow-x-auto">
+                    <table className="min-w-full border-collapse border border-amber-200 text-xs">
+                      <thead>
+                        <tr className="bg-amber-100/80">
+                          <th className="border border-amber-200 px-2 py-1.5 text-left font-medium">Resident</th>
+                          <th className="border border-amber-200 px-2 py-1.5 text-left font-medium">Month</th>
+                          <th className="border border-amber-200 px-2 py-1.5 text-left font-medium">Rotation</th>
+                          <th className="border border-amber-200 px-2 py-1.5 text-left font-medium">Policy</th>
+                          <th className="border border-amber-200 px-2 py-1.5 text-left font-medium">
+                            Overlapping vacation dates
+                          </th>
+                          <th className="border border-amber-200 px-2 py-1.5 text-left font-medium">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {vacationDetails.map((row, i) => (
+                          <tr key={`${row.resident_id}-${row.month_id}-${row.rotation_id}-${i}`}>
+                            <td className="border border-amber-200 px-2 py-1.5">{row.resident_name}</td>
+                            <td className="border border-amber-200 px-2 py-1.5">{row.month_label}</td>
+                            <td className="border border-amber-200 px-2 py-1.5">{row.rotation_name}</td>
+                            <td className="border border-amber-200 px-2 py-1.5">{row.policy}</td>
+                            <td className="border border-amber-200 px-2 py-1.5">
+                              {row.overlapping_vacation_start && row.overlapping_vacation_end
+                                ? `${row.overlapping_vacation_start} – ${row.overlapping_vacation_end}`
+                                : "—"}
+                            </td>
+                            <td className="border border-amber-200 px-2 py-1.5 align-top">
+                              <div className="flex flex-col gap-1.5 items-start min-w-[10rem]">
+                                <a
+                                  href={schedulerSetupHref({
+                                    programId,
+                                    academicYearId,
+                                    viewParam,
+                                    hash: `rotation-row-${row.rotation_id}`,
+                                  })}
+                                  className="text-blue-700 underline hover:text-blue-900"
+                                >
+                                  Jump to rotation settings
+                                </a>
+                                {row.from_fixed_rule && row.fixed_rule_id ? (
+                                  <>
+                                    <a
+                                      href={schedulerSetupHref({
+                                        programId,
+                                        academicYearId,
+                                        viewParam,
+                                        hash: `fixed-rule-${row.fixed_rule_id}`,
+                                      })}
+                                      className="text-blue-700 underline hover:text-blue-900"
+                                    >
+                                      Jump to fixed assignment
+                                    </a>
+                                    <button
+                                      type="button"
+                                      disabled={clearingFixedRuleId !== null}
+                                      onClick={() => void deleteFixedRule(row.fixed_rule_id!)}
+                                      className="text-left text-sm text-amber-900 underline hover:text-amber-950 disabled:opacity-50"
+                                    >
+                                      {clearingFixedRuleId === row.fixed_rule_id
+                                        ? "Clearing…"
+                                        : "Clear fixed assignment"}
+                                    </button>
+                                  </>
+                                ) : (
+                                  <a
+                                    href={schedulerSetupHref({
+                                      programId,
+                                      academicYearId,
+                                      viewParam,
+                                      hash: "section-fixed-assignments",
+                                    })}
+                                    className="text-blue-700 underline hover:text-blue-900"
+                                  >
+                                    Open fixed assignments
+                                  </a>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              )}
+            </div>
           )}
 
           {audit.requirementViolations.length > 0 && (

@@ -4,11 +4,20 @@
   "private": true,
   "scripts": {
     "add-program": "node scripts/add-program.js",
-    "dev": "WATCHPACK_POLLING=true next dev",
-    "build": "next build",
-    "start": "next start",
+    "clean": "rm -rf .next node_modules/.cache",
+    "dev": "WATCHPACK_POLLING=true next dev .",
+    "dev:clean": "npm run clean && WATCHPACK_POLLING=true next dev .",
+    "build": "next build .",
+    "start": "next start .",
     "lint": "next lint",
-    "test:super-admin": "node scripts/test-super-admin-auth.mjs"
+    "test:super-admin": "node scripts/test-super-admin-auth.mjs",
+    "test:scheduler": "vitest run lib/scheduler/engine",
+    "validate:witness": "vitest run lib/scheduler/engine/witnessProgram.test.ts",
+    "debug:witness-schedule": "tsx scripts/debug-witness-schedule.ts",
+    "debug:scheduler-real-case": "tsx scripts/debug-scheduler-real-case.ts",
+    "export:scheduler-setup": "tsx scripts/export-scheduler-setup.ts",
+    "debug:scheduler-ladder": "tsx scripts/run-feasibility-ladder.ts",
+    "debug:fixed-conflicts": "tsx scripts/dump-fixed-conflicts.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.8.0",
@@ -26,6 +35,8 @@
     "eslint-config-next": "14.2.35",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
-    "typescript": "^5"
+    "tsx": "^4.19.3",
+    "typescript": "^5",
+    "vitest": "^2.1.9"
   }
 }

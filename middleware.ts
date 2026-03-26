@@ -2,8 +2,29 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
 export async function middleware(request: NextRequest) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  const pathname = request.nextUrl.pathname;
+  const isProtected =
+    pathname.startsWith("/admin") ||
+    pathname.startsWith("/api/admin") ||
+    pathname.startsWith("/api/super-admin") ||
+    pathname.startsWith("/api/scheduler");
+  const isLogin = pathname.startsWith("/login");
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    console.error(
+      "[middleware] Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY — add them to .env.local (see .env.example)."
+    );
+    if (isProtected && !isLogin) {
+      const loginUrl = request.nextUrl.clone();
+      loginUrl.pathname = "/login";
+      loginUrl.searchParams.set("next", pathname + request.nextUrl.search);
+      return NextResponse.redirect(loginUrl);
+    }
+    return NextResponse.next({ request });
+  }
 
   // Following Supabase's exact recommended middleware pattern.
   // Key: setAll must update request.cookies AND recreate the response so
@@ -30,15 +51,6 @@ export async function middleware(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  const pathname = request.nextUrl.pathname;
-  const isProtected =
-    pathname.startsWith("/admin") ||
-    pathname.startsWith("/api/admin") ||
-    pathname.startsWith("/api/super-admin") ||
-    pathname.startsWith("/api/scheduler");
-
-  const isLogin = pathname.startsWith("/login");
 
   if (isProtected && !user && !isLogin) {
     const loginUrl = request.nextUrl.clone();

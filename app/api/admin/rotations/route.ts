@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { directorAuthErrorResponse } from "@/lib/auth/directorContext";
 import { getProgramContextForRequest, getProgramIdFromRequest } from "@/lib/auth/schedulerContext";
+import { normalizeVacationOverlapPolicy } from "@/lib/scheduler/vacationOverlapPolicy";
 
 export async function GET(request: NextRequest) {
   const supabase = createSupabaseServerClient(request);
@@ -68,6 +69,7 @@ export async function POST(request: NextRequest) {
       is_back_to_back_consult_blocker: body.is_back_to_back_consult_blocker === true,
       is_transplant: body.is_transplant === true,
       is_primary_site: body.is_primary_site === true,
+      vacation_overlap_policy: normalizeVacationOverlapPolicy(body.vacation_overlap_policy),
     })
     .select()
     .single();

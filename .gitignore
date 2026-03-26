@@ -20,7 +20,8 @@
 .DS_Store
 *.pem
 
-# debug
+# debug (exported setup / reports — keep out of repo)
+debug/*.json
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

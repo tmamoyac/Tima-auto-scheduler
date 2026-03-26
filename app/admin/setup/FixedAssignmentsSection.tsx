@@ -179,7 +179,8 @@ export function FixedAssignmentsSection({
             rules.map((r) => (
               <div
                 key={r.id}
-                className="flex items-center gap-4 py-3 first:pt-0"
+                id={`fixed-rule-${r.id}`}
+                className="flex items-center gap-4 py-3 first:pt-0 scroll-mt-24"
               >
                 <span className="flex-1 text-sm font-medium text-gray-900">{r.resident_name}</span>
                 <span className="text-sm text-gray-600">{r.month_label}</span>
@@ -213,7 +214,7 @@ export function FixedAssignmentsSection({
                 </tr>
               ) : (
                 rules.map((r) => (
-                  <tr key={r.id}>
+                  <tr key={r.id} id={`fixed-rule-${r.id}`} className="scroll-mt-24">
                     <td className="border border-gray-300 p-2">{r.resident_name}</td>
                     <td className="border border-gray-300 p-2">{r.month_label}</td>
                     <td className="border border-gray-300 p-2">{r.rotation_name}</td>

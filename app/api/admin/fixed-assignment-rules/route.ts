@@ -139,9 +139,7 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   const id = request.nextUrl.searchParams.get("id");
-  if (!id) {
-    return NextResponse.json({ error: "id required" }, { status: 400 });
-  }
+  const academicYearId = request.nextUrl.searchParams.get("academicYearId");
   const supabase = createSupabaseServerClient(request);
   const programIdFromQuery = getProgramIdFromRequest(request.nextUrl.searchParams);
   let ctx;
@@ -152,11 +150,36 @@ export async function DELETE(request: NextRequest) {
     if (res) return NextResponse.json({ error: res.error }, { status: res.status });
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { supabase: db } = ctx;
+  const { programId, supabase: db } = ctx;
 
-  const { error } = await db.from("fixed_assignment_rules").delete().eq("id", id);
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (id) {
+    const { error } = await db.from("fixed_assignment_rules").delete().eq("id", id);
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    return NextResponse.json({ ok: true });
   }
-  return NextResponse.json({ ok: true });
+
+  if (academicYearId) {
+    const { data: year, error: yearErr } = await db
+      .from("academic_years")
+      .select("id")
+      .eq("id", academicYearId)
+      .eq("program_id", programId)
+      .maybeSingle();
+    if (yearErr || !year) {
+      return NextResponse.json({ error: "Academic year not found" }, { status: 404 });
+    }
+    const { data: removed, error } = await db
+      .from("fixed_assignment_rules")
+      .delete()
+      .eq("academic_year_id", academicYearId)
+      .select("id");
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    return NextResponse.json({ ok: true, deletedCount: (removed ?? []).length });
+  }
+
+  return NextResponse.json({ error: "id or academicYearId required" }, { status: 400 });
 }

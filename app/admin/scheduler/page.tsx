@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getSchedulerContext } from "@/lib/auth/schedulerContext";
+import { ExportSolverSetupButton } from "./ExportSolverSetupButton";
+import { FixedAssignmentsDebugPanel } from "./FixedAssignmentsDebugPanel";
 import { GenerateScheduleButton } from "./GenerateScheduleButton";
 import { ScheduleVersionPicker } from "./ScheduleVersionPicker";
 import { SchedulerRefreshButton } from "./SchedulerRefreshButton";
@@ -212,7 +214,8 @@ export default async function SchedulerPage({
   const academicYearIdOverride =
     typeof academicYearIdRaw === "string" && academicYearIdRaw.length > 0 ? academicYearIdRaw : undefined;
 
-  const viewMode = params.view === "rotations" ? "rotations" : "residents";
+  /** Default: rotations as rows (PDs’ usual matrix). Use `view=residents` for resident rows. */
+  const viewMode = params.view === "residents" ? "residents" : "rotations";
   const context = await getContext(programIdOverride, academicYearIdOverride);
 
   const supabase = createSupabaseServerClient();
@@ -333,8 +336,8 @@ export default async function SchedulerPage({
 
   const viewToggleHref =
     viewMode === "residents"
-      ? `/admin/scheduler?tab=schedule&programId=${programId}&academicYearId=${academicYearId}${selectedVersionId ? `&versionId=${selectedVersionId}` : ""}&view=rotations`
-      : `/admin/scheduler?tab=schedule&programId=${programId}&academicYearId=${academicYearId}${selectedVersionId ? `&versionId=${selectedVersionId}` : ""}`;
+      ? `/admin/scheduler?tab=schedule&programId=${programId}&academicYearId=${academicYearId}${selectedVersionId ? `&versionId=${selectedVersionId}` : ""}`
+      : `/admin/scheduler?tab=schedule&programId=${programId}&academicYearId=${academicYearId}${selectedVersionId ? `&versionId=${selectedVersionId}` : ""}&view=residents`;
 
   return (
     <Suspense fallback={<div className="p-6 text-gray-500">Loading…</div>}>
@@ -348,7 +351,7 @@ export default async function SchedulerPage({
         isSuperAdmin={isSuperAdmin}
         headerRight={
           <a href={viewToggleHref} className="text-sm text-blue-600 underline">
-            {viewMode === "residents" ? "Change view: Rotations" : "Change view: Residents"}
+            {viewMode === "rotations" ? "Change view: Residents" : "Change view: Rotations"}
           </a>
         }
       >
@@ -365,71 +368,11 @@ export default async function SchedulerPage({
       <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-4 max-w-xl">
         Changed residents or rotations on Setup? Click <strong>Refresh</strong> below to load them here.
       </p>
+      {academicYearId ? (
+        <FixedAssignmentsDebugPanel programId={programId} academicYearId={academicYearId} />
+      ) : null}
       <div className="overflow-x-auto mb-6">
-        {viewMode === "residents" ? (
-          <table className="border-collapse border border-gray-300 text-sm">
-            <thead>
-              <tr>
-                <th className="border border-gray-300 bg-gray-100 px-2 py-1.5 text-left sticky left-0 z-10 min-w-[100px]">
-                  Resident
-                </th>
-                {monthsTyped.map((m) => {
-                  const shortLabel = m.month_label
-                    ? m.month_label.slice(0, 3) + (m.month_label.includes("2027") ? " '27" : " '26")
-                    : "";
-                  return (
-                    <th
-                      key={m.id}
-                      className="border border-gray-300 bg-gray-100 px-1 py-1.5 text-center min-w-[64px] max-w-[80px]"
-                      title={m.month_label ?? undefined}
-                    >
-                      <span className="truncate block" title={m.month_label ?? undefined}>
-                        {shortLabel || m.month_label}
-                      </span>
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {residents.map((r) => (
-                <tr key={r.id}>
-                  <td className="border border-gray-300 px-2 py-1.5 sticky left-0 bg-white z-10 font-medium min-w-[100px] text-xs">
-                    {r.first_name} {r.last_name} (PGY{r.pgy})
-                  </td>
-                  {monthsTyped.map((m) => {
-                    const key = `${r.id}_${m.id}`;
-                    const rotationLabel = cellRotationLabel.get(key) ?? "—";
-                    const mStart = m.start_date ?? "";
-                    const mEnd = m.end_date ?? "";
-                    const vacationLabels =
-                      mStart && mEnd ? getVacationLabelsInMonth(vacationRequests, r.id, mStart, mEnd) : [];
-                    return (
-                      <td
-                        key={m.id}
-                        className="border border-gray-300 px-1 py-1.5 text-center text-gray-700 align-top min-w-[64px] max-w-[80px]"
-                      >
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-xs block break-words" title={rotationLabel}>
-                            {rotationLabel}
-                          </span>
-                          {vacationLabels.length > 0 && (
-                            <span
-                              className="text-[10px] text-amber-700 block break-words"
-                              title={`Vacation: ${vacationLabels.join(", ")}`}
-                            >
-                              Vac: {vacationLabels.join(", ")}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
+        {viewMode === "rotations" ? (
           <table className="border-collapse border border-gray-300 text-sm">
             <thead>
               <tr>
@@ -550,10 +493,74 @@ export default async function SchedulerPage({
               )}
             </tbody>
           </table>
+        ) : (
+          <table className="border-collapse border border-gray-300 text-sm">
+            <thead>
+              <tr>
+                <th className="border border-gray-300 bg-gray-100 px-2 py-1.5 text-left sticky left-0 z-10 min-w-[100px]">
+                  Resident
+                </th>
+                {monthsTyped.map((m) => {
+                  const shortLabel = m.month_label
+                    ? m.month_label.slice(0, 3) + (m.month_label.includes("2027") ? " '27" : " '26")
+                    : "";
+                  return (
+                    <th
+                      key={m.id}
+                      className="border border-gray-300 bg-gray-100 px-1 py-1.5 text-center min-w-[64px] max-w-[80px]"
+                      title={m.month_label ?? undefined}
+                    >
+                      <span className="truncate block" title={m.month_label ?? undefined}>
+                        {shortLabel || m.month_label}
+                      </span>
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {residents.map((r) => (
+                <tr key={r.id}>
+                  <td className="border border-gray-300 px-2 py-1.5 sticky left-0 bg-white z-10 font-medium min-w-[100px] text-xs">
+                    {r.first_name} {r.last_name} (PGY{r.pgy})
+                  </td>
+                  {monthsTyped.map((m) => {
+                    const key = `${r.id}_${m.id}`;
+                    const rotationLabel = cellRotationLabel.get(key) ?? "—";
+                    const mStart = m.start_date ?? "";
+                    const mEnd = m.end_date ?? "";
+                    const vacationLabels =
+                      mStart && mEnd ? getVacationLabelsInMonth(vacationRequests, r.id, mStart, mEnd) : [];
+                    return (
+                      <td
+                        key={m.id}
+                        className="border border-gray-300 px-1 py-1.5 text-center text-gray-700 align-top min-w-[64px] max-w-[80px]"
+                      >
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-xs block break-words" title={rotationLabel}>
+                            {rotationLabel}
+                          </span>
+                          {vacationLabels.length > 0 && (
+                            <span
+                              className="text-[10px] text-amber-700 block break-words"
+                              title={`Vacation: ${vacationLabels.join(", ")}`}
+                            >
+                              Vac: {vacationLabels.join(", ")}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
       <div className="flex flex-wrap items-center gap-3 p-4 border-t border-gray-200 bg-gray-50 rounded-lg">
         <GenerateScheduleButton programId={programId} />
+        <ExportSolverSetupButton programId={programId} />
         <SchedulerRefreshButton />
         {versions.length > 0 && (
           <ScheduleVersionPicker
