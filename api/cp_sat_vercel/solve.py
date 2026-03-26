@@ -38,8 +38,14 @@ class handler(BaseHTTPRequestHandler):
         sys.stderr.flush()
 
     def do_POST(self) -> None:
+        # Vercel passes the full URL path (e.g. /api/cp_sat_vercel/solve), not just /solve.
         path = urlparse(self.path).path.rstrip("/") or "/"
-        if path not in ("/", "/solve"):
+        allowed = (
+            "/",
+            "/solve",
+            "/api/cp_sat_vercel/solve",
+        )
+        if path not in allowed and not path.endswith("/cp_sat_vercel/solve"):
             self.send_error(404)
             return
 
