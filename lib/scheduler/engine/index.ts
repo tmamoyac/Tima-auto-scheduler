@@ -61,7 +61,18 @@ export {
   ACADEMIC_MONTH_LABELS,
   type DetailedValidationReport,
 } from "./validateScheduleDetailed";
-export { invokeCpSatSolver } from "./cpSatInvoke";
+export {
+  invokeCpSatSolver,
+  invokeCpSatSolverLocalSync,
+} from "./cpSatInvoke";
+export {
+  getCpSatCapabilities,
+  clearCpSatCapabilitiesCache,
+  checkVercelPythonCpSatHealth,
+  resolveVercelPythonBaseUrl,
+  checkRemoteCpSatHealth,
+} from "./cpSatRuntime";
+export type { CpSatUnavailableDetail, CpSatCapabilities } from "./cpSatRuntime";
 export { FEASIBILITY_LADDER_STAGE_NAMES, CP_MASK_ALL_TRUE, type CpConstraintMask } from "./cpConstraintMask";
 export {
   witnessProgramStaticData,

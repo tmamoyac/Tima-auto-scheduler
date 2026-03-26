@@ -13,6 +13,7 @@ import {
 } from "./engine/buildCpSatPayload";
 import { getFixedProhibitedVacationOverlapBlock } from "./engine/fixedVacationOverlapCheck";
 import { computeVacationOverlapReport as buildVacationOverlapReport } from "./engine/vacationOverlapReport";
+import type { CpSatUnavailableDetail } from "./engine/cpSatRuntime";
 import { computeWitnessFirstFailureIfConfigured } from "./engine/witnessFromEnv";
 import type { VacationOverlapPolicy } from "./vacationOverlapPolicy";
 import { normalizeRotationsVacationPolicy } from "./vacationOverlapPolicy";
@@ -26,6 +27,7 @@ export type {
   VacationOverlapDetailRow,
   VacationOverlapSummary,
 } from "./scheduleClientShare";
+export type { CpSatUnavailableDetail } from "./engine/cpSatRuntime";
 export {
   formatStrenuousBestEffortBanner,
   SCHEDULE_SEARCH_BUDGET_MS,
@@ -3236,6 +3238,16 @@ export class ScheduleVacationOverlapFixedBlockError extends Error {
   }
 }
 
+/** CP-SAT cannot run in this runtime (missing Python, OR-Tools, or unreachable remote solver). */
+export class ScheduleCpSatUnavailableError extends Error {
+  readonly cp_sat_unavailable: CpSatUnavailableDetail;
+  constructor(detail: CpSatUnavailableDetail) {
+    super(detail.message);
+    this.name = "ScheduleCpSatUnavailableError";
+    this.cp_sat_unavailable = detail;
+  }
+}
+
 /**
  * Strenuous consult spacing audit lines: adjacent blocker months and 3-in-a-row (or legacy consult fallback labels).
  */
@@ -3459,7 +3471,7 @@ export async function generateSchedule({
 
   if (schedulerEngine !== "heuristic") {
     const { trySolveScheduleWithCpSat } = await import("./cpSatSolver");
-    const { result: cp } = trySolveScheduleWithCpSat(staticData);
+    const { result: cp } = await trySolveScheduleWithCpSat(staticData);
     if (cp.kind === "ok") {
       const scheduleVersionId = await persistSchedule({
         supabaseAdmin,
@@ -3485,8 +3497,11 @@ export async function generateSchedule({
         computeWitnessFirstFailureIfConfigured(staticData) ?? undefined
       );
     }
+    if (cp.kind === "unavailable" && cp.cp_sat_unavailable) {
+      throw new ScheduleCpSatUnavailableError(cp.cp_sat_unavailable);
+    }
     throw new Error(
-      `${cp.reason} Schedule generation uses CP-SAT by default. Install Python 3 and OR-Tools: python3 -m pip install -r scripts/requirements-cp.txt. To use the legacy heuristic search instead, set SCHEDULER_ENGINE=heuristic in .env.local.`
+      `${cp.reason} Schedule generation uses CP-SAT by default. Configure a Python runtime, set SCHEDULER_CP_SOLVER_URL to a remote solver, or use SCHEDULER_ENGINE=heuristic only as a fallback. See docs/cp-sat-production.md`
     );
   }
 

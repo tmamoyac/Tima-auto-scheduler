@@ -87,8 +87,8 @@ describe("runDebugFixture", () => {
 describe("CP-SAT integration", () => {
   it.skipIf(process.env.CI === "true" || process.env.SKIP_CP_SAT_TEST === "1")(
     "solves tiny feasible fixture (set SKIP_CP_SAT_TEST=1 or CI=true to skip)",
-    () => {
-      const { result, debug } = solveScheduleFeasibilityCpSat(tinyFeasibleFixture());
+    async () => {
+      const { result, debug } = await solveScheduleFeasibilityCpSat(tinyFeasibleFixture());
       expect(debug.lines.some((l) => l.includes("status="))).toBe(true);
       expect(result.kind).toBe("ok");
       if (result.kind === "ok") {

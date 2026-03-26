@@ -10,7 +10,7 @@ import {
   readCpSatHardFlagsFromEnv,
   readRequirementsModeFromEnv,
 } from "./buildCpSatPayload";
-import { CP_FEASIBLE, CP_OPTIMAL, invokeCpSatSolver } from "./cpSatInvoke";
+import { CP_FEASIBLE, CP_OPTIMAL, invokeCpSatSolverLocalSync } from "./cpSatInvoke";
 import { normalizeSchedulerInput, reqKey } from "./normalizeInput";
 
 export type FixedRowClassification =
@@ -43,7 +43,7 @@ function stage9Sat(staticData: LoadedSchedulerStaticData): boolean {
   const flags = readCpSatHardFlagsFromEnv();
   const reqMode = readRequirementsModeFromEnv();
   const payload = buildCpSatJsonPayload(n, flags, { ladderStage: 9, requirementsMode: reqMode });
-  const raw = invokeCpSatSolver(payload as Record<string, unknown>);
+  const raw = invokeCpSatSolverLocalSync(payload as Record<string, unknown>);
   return (
     raw.ok &&
     raw.grid != null &&
@@ -56,7 +56,7 @@ function stage8WitnessGrid(staticData: LoadedSchedulerStaticData): number[][] | 
   const flags = readCpSatHardFlagsFromEnv();
   const reqMode = readRequirementsModeFromEnv();
   const payload = buildCpSatJsonPayload(n, flags, { ladderStage: 8, requirementsMode: reqMode });
-  const raw = invokeCpSatSolver(payload as Record<string, unknown>);
+  const raw = invokeCpSatSolverLocalSync(payload as Record<string, unknown>);
   if (!raw.ok || raw.grid == null || (raw.status !== CP_OPTIMAL && raw.status !== CP_FEASIBLE)) {
     return null;
   }

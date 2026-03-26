@@ -6,6 +6,7 @@ import { apiFetch } from "@/lib/apiFetch";
 import {
   formatStrenuousBestEffortBanner,
   SCHEDULE_SEARCH_BUDGET_MS,
+  type CpSatUnavailableDetail,
   type FeasibilityReport,
   type ScheduleAudit,
   type StrenuousConsultB2bBestEffortMeta,
@@ -36,6 +37,21 @@ function vacationSummaryFromDetails(rows: VacationOverlapDetailRow[]): VacationO
   return {
     prohibited_violation_count: rows.filter((r) => r.policy === "Prohibited").length,
     avoid_used_count: rows.filter((r) => r.policy === "Avoid").length,
+  };
+}
+
+function parseCpSatUnavailablePayload(raw: unknown): CpSatUnavailableDetail | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  if (o.code !== "CP_SAT_RUNTIME_UNAVAILABLE") return null;
+  return {
+    code: "CP_SAT_RUNTIME_UNAVAILABLE",
+    cause: String(o.cause ?? "unknown"),
+    message: String(o.message ?? ""),
+    executable: o.executable != null ? String(o.executable) : undefined,
+    os_error: o.os_error != null ? String(o.os_error) : undefined,
+    stderr_snippet: o.stderr_snippet != null ? String(o.stderr_snippet) : undefined,
+    remediation: Array.isArray(o.remediation) ? o.remediation.map(String) : [],
   };
 }
 
@@ -90,6 +106,8 @@ export function GenerateScheduleButton({
   /** After clearing the fixed pin that blocked generate, until the next generate attempt. */
   const [vacationPinResolvedNote, setVacationPinResolvedNote] = useState<string | null>(null);
   const [clearingFixedRuleId, setClearingFixedRuleId] = useState<string | null>(null);
+  /** HTTP 503 structured CP-SAT runtime failure */
+  const [cpSatUnavailable, setCpSatUnavailable] = useState<CpSatUnavailableDetail | null>(null);
   const searchParams = useSearchParams();
 
   const academicYearId =
@@ -282,6 +300,7 @@ export function GenerateScheduleButton({
     setVacationDetails([]);
     setVacationBlocked(null);
     setVacationPinResolvedNote(null);
+    setCpSatUnavailable(null);
 
     const controller = new AbortController();
     /** Timer handle — DOM `number` vs Node `Timeout`; clearTimeout accepts both. */
@@ -327,6 +346,7 @@ export function GenerateScheduleButton({
         vacation_overlap_summary?: VacationOverlapSummary;
         vacation_overlap_details?: VacationOverlapDetailRow[];
         vacation_overlap_blocked?: VacationOverlapBlocked;
+        cp_sat_unavailable?: CpSatUnavailableDetail;
       } = {};
       if (contentType.includes("application/json")) {
         data = await res.json();
@@ -360,10 +380,30 @@ export function GenerateScheduleButton({
           });
         }
         if (data.feasibilityReport) setFeasibilityReport(data.feasibilityReport);
-        if (!wf) {
+
+        const cpUnavail = parseCpSatUnavailablePayload(data.cp_sat_unavailable);
+        if (res.status === 503 && cpUnavail) {
+          setCpSatUnavailable(cpUnavail);
+          setEngineBanner(
+            "Production hosts such as Vercel usually do not include Python. Set SCHEDULER_CP_SOLVER_URL to a small Python solver service (see docs/cp-sat-production.md), or run the app on a server where python3 and OR-Tools are installed."
+          );
+          setMessage({
+            type: "error",
+            text: cpUnavail.message || data.error || "CP-SAT cannot run on this server.",
+          });
+          return;
+        }
+        setCpSatUnavailable(null);
+
+        const errLine = (data.error ?? "").trim();
+        if (!wf && /python3 ENOENT|spawnSync python3 ENOENT|spawn: spawnSync python3 ENOENT/i.test(errLine)) {
+          setEngineBanner(
+            "This server cannot start the CP-SAT solver (Python was not found). Deploy the latest app for structured errors, then either set SCHEDULER_CP_SOLVER_URL to a remote solver or use a host with Python 3 + OR-Tools. See docs/cp-sat-production.md in the repository."
+          );
+        } else if (!wf) {
           if (data.schedulerEngineUsed === "heuristic") {
             setEngineBanner(
-              "This failure used the legacy randomized search, not CP-SAT — so the blue box can name example residents and mention “two phases.” To use the constraint solver: run python3 -m pip install -r scripts/requirements-cp.txt, make sure .env.local does not set SCHEDULER_ENGINE=heuristic, restart npm run dev, then generate again."
+              "This failure used the legacy randomized search, not CP-SAT. For the constraint solver: install Python 3 + OR-Tools locally, or set SCHEDULER_CP_SOLVER_URL in production, and do not set SCHEDULER_ENGINE=heuristic unless you accept lower-quality schedules."
             );
           } else if (data.schedulerEngineUsed === "cp_sat") {
             setEngineBanner(
@@ -513,6 +553,39 @@ export function GenerateScheduleButton({
       {engineBanner && !witnessFirstFailure && (
         <div className="mt-3 max-w-2xl rounded-lg border border-amber-400 bg-amber-50 p-3 text-sm text-amber-950">
           {engineBanner}
+        </div>
+      )}
+
+      {cpSatUnavailable && (
+        <div
+          className="mt-3 max-w-2xl rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-950"
+          role="alert"
+        >
+          <h3 className="mb-2 font-semibold text-rose-900">CP-SAT solver unavailable</h3>
+          <p className="mb-2">{cpSatUnavailable.message}</p>
+          {cpSatUnavailable.cause ? (
+            <p className="mb-2 text-xs text-rose-800">
+              Cause: {cpSatUnavailable.cause}
+              {cpSatUnavailable.os_error ? ` (${cpSatUnavailable.os_error})` : ""}
+            </p>
+          ) : null}
+          {cpSatUnavailable.remediation.length > 0 ? (
+            <ul className="mb-2 list-disc space-y-1 pl-5">
+              {cpSatUnavailable.remediation.map((r, i) => (
+                <li key={i}>{r}</li>
+              ))}
+            </ul>
+          ) : null}
+          {cpSatUnavailable.stderr_snippet ? (
+            <pre className="mt-2 max-h-24 overflow-auto rounded border border-rose-200 bg-white p-2 font-mono text-xs text-rose-900">
+              {cpSatUnavailable.stderr_snippet}
+            </pre>
+          ) : null}
+          <p className="mt-3 text-xs text-rose-800">
+            Deploy guide:{" "}
+            <code className="rounded bg-white px-1 py-0.5 text-[11px]">docs/cp-sat-production.md</code> in this
+            repository.
+          </p>
         </div>
       )}
 

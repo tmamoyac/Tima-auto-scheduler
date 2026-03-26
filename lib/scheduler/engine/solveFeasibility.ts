@@ -11,6 +11,7 @@ import { debugLog } from "./debug";
 import { buildInfeasibilityDiagnostics } from "./feasibilityDiagnostics";
 import { formatFeasibilityLadderReport, runFeasibilityLadder } from "./feasibilityLadder";
 import { normalizeSchedulerInput } from "./normalizeInput";
+import { getCpSatCapabilities } from "./cpSatRuntime";
 import type { CpSatGenerateResult } from "./types";
 import { formatValidationReport, validateSchedule } from "./validateSchedule";
 import type { SolveFeasibilityDebug } from "./types";
@@ -35,10 +36,10 @@ function buildCpSatInfeasibilityReport(): FeasibilityReport {
 /**
  * Feasibility-only CP-SAT run with structured logging and engine validation (single source of truth).
  */
-export function solveScheduleFeasibilityCpSat(staticData: LoadedSchedulerStaticData): {
+export async function solveScheduleFeasibilityCpSat(staticData: LoadedSchedulerStaticData): Promise<{
   result: CpSatGenerateResult;
   debug: SolveFeasibilityDebug;
-} {
+}> {
   const lines: string[] = [];
   const t0 = Date.now();
   const fixedVacErr = getFirstFixedProhibitedVacationOverlapError(staticData);
@@ -51,6 +52,24 @@ export function solveScheduleFeasibilityCpSat(staticData: LoadedSchedulerStaticD
       debug: { lines, wallMs: Date.now() - t0 },
     };
   }
+
+  const cap = getCpSatCapabilities();
+  lines.push(
+    `cp_sat_mode=${cap.mode} can_invoke=${cap.can_invoke}${cap.remote_base_url ? ` remote_configured=1` : ""}${cap.vercel_python_base_url ? ` vercel_py_base=1` : ""}`
+  );
+  if (!cap.can_invoke && cap.unavailable) {
+    lines.push(`cp_sat_blocked=${cap.unavailable.cause}`);
+    console.warn("[scheduler:cp_sat]\n" + lines.join("\n"));
+    return {
+      result: {
+        kind: "unavailable",
+        reason: cap.unavailable.message,
+        cp_sat_unavailable: cap.unavailable,
+      },
+      debug: { lines, wallMs: Date.now() - t0 },
+    };
+  }
+
   const normalized = normalizeSchedulerInput(staticData);
   const flags = readCpSatHardFlagsFromEnv();
   lines.push(
@@ -70,10 +89,19 @@ export function solveScheduleFeasibilityCpSat(staticData: LoadedSchedulerStaticD
     lines.push(`vacation_overlap_policy_rotations=${JSON.stringify(hf.vacation_overlap_policy_rotations)}`);
   }
   const scriptPath = path.join(process.cwd(), "scripts", "solve_schedule_cp_sat.py");
-  const py = process.env.PYTHON ?? "python3";
-  lines.push(`python=${py} script=${scriptPath}`);
+  const py = cap.executable ?? process.env.PYTHON ?? "python3";
+  if (cap.mode === "vercel_python") {
+    lines.push(`vercel_python=${cap.vercel_python_base_url ?? ""}`);
+  } else {
+    lines.push(`python=${py} script=${scriptPath}`);
+  }
 
-  const parsed = invokeCpSatSolver(payload);
+  const parsed = await invokeCpSatSolver(payload, {
+    mode: cap.mode,
+    executable: cap.executable,
+    remote_base_url: cap.remote_base_url,
+    vercel_python_base_url: cap.vercel_python_base_url,
+  });
 
   const wallMs = Date.now() - t0;
   lines.push(`wall_ms=${wallMs}`);
@@ -82,10 +110,16 @@ export function solveScheduleFeasibilityCpSat(staticData: LoadedSchedulerStaticD
     lines.push(`invoke_failed=${parsed.reason}`);
     if (parsed.stderr) lines.push(parsed.stderr.slice(0, 400));
     console.info("[scheduler:cp_sat]\n" + lines.join("\n"));
+    const detail = parsed.unavailable_detail;
     return {
       result: {
         kind: "unavailable",
-        reason: `Could not run CP-SAT (${py}): ${parsed.reason}. Install Python 3 and run: python3 -m pip install -r scripts/requirements-cp.txt`,
+        reason: detail
+          ? detail.message
+          : cap.mode === "vercel_python"
+            ? `Could not run CP-SAT (vercel_python): ${parsed.reason}. See Vercel function logs and docs/cp-sat-production.md.`
+            : `Could not run CP-SAT (${py}): ${parsed.reason}. See docs/cp-sat-production.md.`,
+        ...(detail ? { cp_sat_unavailable: detail } : {}),
       },
       debug: { lines, wallMs },
     };

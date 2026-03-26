@@ -1,4 +1,5 @@
 import type { FeasibilityReport, ScheduleAudit } from "../scheduleClientShare";
+import type { CpSatUnavailableDetail } from "./cpSatRuntime";
 import type { LoadedSchedulerStaticData } from "../generateSchedule";
 
 export type RuleGroup =
@@ -68,4 +69,9 @@ export type CpSatGenerateResult =
       audit: ScheduleAudit;
     }
   | { kind: "infeasible"; feasibilityReport: FeasibilityReport }
-  | { kind: "unavailable"; reason: string };
+  | {
+      kind: "unavailable";
+      reason: string;
+      /** Set when CP-SAT cannot run (missing Python, OR-Tools, or remote solver). */
+      cp_sat_unavailable?: CpSatUnavailableDetail;
+    };

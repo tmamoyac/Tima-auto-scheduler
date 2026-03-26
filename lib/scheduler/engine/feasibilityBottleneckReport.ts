@@ -12,7 +12,12 @@ import {
   type BuildCpSatOptions,
 } from "./buildCpSatPayload";
 import { FEASIBILITY_LADDER_STAGE_NAMES } from "./cpConstraintMask";
-import { CP_FEASIBLE, CP_MODEL_INVALID, CP_OPTIMAL, invokeCpSatSolver } from "./cpSatInvoke";
+import {
+  CP_FEASIBLE,
+  CP_MODEL_INVALID,
+  CP_OPTIMAL,
+  invokeCpSatSolverLocalSync,
+} from "./cpSatInvoke";
 import { residentMonthKey, reqKey } from "./normalizeInput";
 import type { NormalizedSchedulerInput } from "./types";
 import { academicMonthLabelFromIndex } from "./validateScheduleDetailed";
@@ -58,7 +63,7 @@ function solveStageGrid(
     requirementsMode: opts?.requirementsMode ?? readRequirementsModeFromEnv(),
     maxSecondsOverride: opts?.maxSecondsOverride ?? Math.min(60, Number(process.env.CP_SAT_MAX_SECONDS ?? 60) || 60),
   }) as Record<string, unknown>;
-  const raw = invokeCpSatSolver(payload);
+    const raw = invokeCpSatSolverLocalSync(payload);
   if (!raw.ok) return { ok: false, reason: raw.reason };
   const feasible =
     raw.grid != null && (raw.status === CP_OPTIMAL || raw.status === CP_FEASIBLE);

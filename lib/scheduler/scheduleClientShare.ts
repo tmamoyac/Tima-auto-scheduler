@@ -63,6 +63,17 @@ export type VacationOverlapDetailRow = {
   fixed_rule_id?: string | null;
 };
 
+/** Returned with HTTP 503 when CP-SAT cannot run (matches API `cp_sat_unavailable`). */
+export type CpSatUnavailableDetail = {
+  code: "CP_SAT_RUNTIME_UNAVAILABLE";
+  cause: string;
+  executable?: string;
+  os_error?: string;
+  stderr_snippet?: string;
+  message: string;
+  remediation: string[];
+};
+
 /** Fixed pin conflicts with rotation `prohibited` vacation-overlap policy (generate blocked before solve). */
 export type VacationOverlapBlocked = {
   resident_id: string;

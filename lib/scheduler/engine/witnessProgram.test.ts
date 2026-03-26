@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildCpSatJsonPayload } from "./buildCpSatPayload";
-import { CP_OPTIMAL, invokeCpSatSolver } from "./cpSatInvoke";
+import { CP_OPTIMAL, invokeCpSatSolverLocalSync } from "./cpSatInvoke";
 import { normalizeSchedulerInput } from "./normalizeInput";
 import { validateSchedule } from "./validateSchedule";
 import { formatWitnessAuditReport, runWitnessHardConstraintAudit } from "./witnessConstraintAudit";
@@ -53,7 +53,7 @@ describe("witness program (human schedule vs hard model)", () => {
         string,
         unknown
       >;
-      const raw = invokeCpSatSolver(payload);
+      const raw = invokeCpSatSolverLocalSync(payload);
       expect(raw.ok).toBe(true);
       if (raw.ok) {
         expect(raw.status).toBe(CP_OPTIMAL);

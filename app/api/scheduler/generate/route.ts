@@ -6,6 +6,7 @@ import { getProgramContextForRequest, getProgramIdFromRequest } from "@/lib/auth
 import {
   generateSchedule,
   SCHEDULE_ERROR_REQUIREMENTS_UNSATISFIABLE,
+  ScheduleCpSatUnavailableError,
   ScheduleUnsatError,
   ScheduleVacationOverlapFixedBlockError,
 } from "@/lib/scheduler/generateSchedule";
@@ -44,6 +45,15 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     const res = directorAuthErrorResponse(err);
     if (res) return jsonError(res.error, res.status);
+    if (err instanceof ScheduleCpSatUnavailableError) {
+      return NextResponse.json(
+        {
+          error: err.message,
+          cp_sat_unavailable: err.cp_sat_unavailable,
+        },
+        { status: 503 }
+      );
+    }
     if (err instanceof ScheduleVacationOverlapFixedBlockError) {
       return NextResponse.json(
         {

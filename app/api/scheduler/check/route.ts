@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getProgramContextForRequest, getProgramIdFromRequest } from "@/lib/auth/schedulerContext";
-import { checkRemoteCpSatHealth, getCpSatCapabilities } from "@/lib/scheduler/engine/cpSatRuntime";
+import {
+  checkRemoteCpSatHealth,
+  checkVercelPythonCpSatHealth,
+  getCpSatCapabilities,
+} from "@/lib/scheduler/engine/cpSatRuntime";
 
 export const dynamic = "force-dynamic";
 
@@ -95,7 +99,17 @@ export async function GET(request: NextRequest) {
   }
 
   const cap = getCpSatCapabilities(true);
-  if (cap.mode === "remote" && cap.remote_base_url) {
+  if (cap.mode === "vercel_python" && cap.vercel_python_base_url) {
+    const vh = await checkVercelPythonCpSatHealth(cap.vercel_python_base_url);
+    const cpDetail = vh.ok
+      ? `Vercel Python CP-SAT OK (${cap.vercel_python_base_url}/api/cp_sat_vercel/health).`
+      : (vh.error ?? "vercel python health failed");
+    steps.push({
+      name: "CP-SAT runtime",
+      status: cap.can_invoke && vh.ok ? "pass" : "fail",
+      detail: `${cpDetail} Mode: vercel_python.`,
+    });
+  } else if (cap.mode === "remote" && cap.remote_base_url) {
     const rh = await checkRemoteCpSatHealth(cap.remote_base_url);
     const cpDetail = rh.ok
       ? `Remote solver reachable (${cap.remote_base_url}).`
@@ -105,7 +119,7 @@ export async function GET(request: NextRequest) {
       status: cap.can_invoke && rh.ok ? "pass" : "fail",
       detail: cpDetail,
     });
-  } else if (cap.can_invoke) {
+  } else if (cap.mode === "local" && cap.can_invoke) {
     steps.push({
       name: "CP-SAT runtime",
       status: "pass",

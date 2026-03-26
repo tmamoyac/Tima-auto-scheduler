@@ -7,7 +7,13 @@ import {
   type BuildCpSatOptions,
 } from "./buildCpSatPayload";
 import { FEASIBILITY_LADDER_STAGE_NAMES, type CpConstraintMask } from "./cpConstraintMask";
-import { CP_FEASIBLE, CP_INFEASIBLE, CP_MODEL_INVALID, CP_OPTIMAL, invokeCpSatSolver } from "./cpSatInvoke";
+import {
+  CP_FEASIBLE,
+  CP_INFEASIBLE,
+  CP_MODEL_INVALID,
+  CP_OPTIMAL,
+  invokeCpSatSolverLocalSync,
+} from "./cpSatInvoke";
 import { normalizeSchedulerInput } from "./normalizeInput";
 import type { NormalizedSchedulerInput } from "./types";
 
@@ -94,7 +100,7 @@ function runFeasibilityLadderInternal(
       maxSecondsOverride: options?.maxSecondsOverride,
     });
     const mask = payload.constraint_mask as CpConstraintMask;
-    const raw = invokeCpSatSolver(payload as Record<string, unknown>);
+    const raw = invokeCpSatSolverLocalSync(payload as Record<string, unknown>);
     const stats = countPayloadStats(n, payload as Record<string, unknown>);
 
     if (!raw.ok) {
