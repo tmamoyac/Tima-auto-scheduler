@@ -1,0 +1,2 @@
+# Vercel Python Functions (api/cp_sat_vercel/*.py) — minimal CP-SAT PoC
+ortools>=9.10
