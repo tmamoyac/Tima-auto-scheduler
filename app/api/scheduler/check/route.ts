@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getProgramContextForRequest, getProgramIdFromRequest } from "@/lib/auth/schedulerContext";
+import { checkRemoteCpSatHealth, getCpSatCapabilities } from "@/lib/scheduler/engine/cpSatRuntime";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   const steps: { name: string; status: "pass" | "fail"; detail: string }[] = [];
@@ -89,6 +92,31 @@ export async function GET(request: NextRequest) {
             : "Could not connect to database. Check .env.local (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY).",
       });
     }
+  }
+
+  const cap = getCpSatCapabilities(true);
+  if (cap.mode === "remote" && cap.remote_base_url) {
+    const rh = await checkRemoteCpSatHealth(cap.remote_base_url);
+    const cpDetail = rh.ok
+      ? `Remote solver reachable (${cap.remote_base_url}).`
+      : (rh.error ?? "remote health failed");
+    steps.push({
+      name: "CP-SAT runtime",
+      status: cap.can_invoke && rh.ok ? "pass" : "fail",
+      detail: cpDetail,
+    });
+  } else if (cap.can_invoke) {
+    steps.push({
+      name: "CP-SAT runtime",
+      status: "pass",
+      detail: `Local interpreter ${cap.executable ?? "python3"} with OR-Tools OK.`,
+    });
+  } else {
+    steps.push({
+      name: "CP-SAT runtime",
+      status: "fail",
+      detail: cap.unavailable?.message ?? "CP-SAT not available.",
+    });
   }
 
   const allPass = steps.every((s) => s.status === "pass");
